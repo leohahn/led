@@ -14,16 +14,6 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("hed", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
-    // Link C std lib.
-    exe.linkLibC();
-
-    // Add ncurses.
-    exe.addIncludeDir("/Users/leonardohahn/zig/lib/include");
-    exe.addIncludeDir("/usr/local/Cellar/ncurses/6.3/include");
-
-    exe.addLibPath("/use/local/Cellar/ncurses/6.3/lib");
-    exe.linkSystemLibraryName("ncurses");
-
     exe.install();
 
     const run_cmd = exe.run();

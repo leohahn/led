@@ -34,7 +34,7 @@ const PiecePosition = union(enum) {
     },
 };
 
-fn find_byte_position_from_rune(rune_position: u32, piece_buffer: []const u8) ?u32 {
+fn findBytePositionFromRune(rune_position: u32, piece_buffer: []const u8) ?u32 {
     var rune_i: u32 = 0;
     var it = std.unicode.Utf8Iterator{
         .bytes = piece_buffer,
@@ -122,7 +122,7 @@ pub const PieceTable = struct {
             return error.InvalidUtf8Slice;
         }
 
-        const piece_position = self.find_position(position) orelse return error.InvalidPosition;
+        const piece_position = self.findPosition(position) orelse return error.InvalidPosition;
 
         var inserted_piece: Piece = try self.add_to_append_buffer(slice);
 
@@ -160,7 +160,7 @@ pub const PieceTable = struct {
     }
 
     pub fn itemAt(self: *Self, rune_position: u32) !?u21 {
-        const piece_position = self.find_position(rune_position) orelse return null;
+        const piece_position = self.findPosition(rune_position) orelse return null;
 
         switch (piece_position) {
             .inside_piece => |inside_piece| {
@@ -183,7 +183,7 @@ pub const PieceTable = struct {
         return inserted_piece;
     }
 
-    fn find_position(self: *Self, rune_position: u32) ?PiecePosition {
+    fn findPosition(self: *Self, rune_position: u32) ?PiecePosition {
         var piece_index: ?u32 = null;
         var piece_offset: u32 = 0;
 
@@ -201,7 +201,7 @@ pub const PieceTable = struct {
                 continue;
             }
 
-            const offset = find_byte_position_from_rune(
+            const offset = findBytePositionFromRune(
                 rune_position - (accumulated_rune_offset - buffer_rune_count),
                 buffer,
             );
