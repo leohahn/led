@@ -127,6 +127,21 @@ pub fn readInputEvent() !?Key {
     }
 
     if (buffer[0] == '\x1b') {
+        var escape_seq = [1]u8{0} ** 2;
+
+        if ((try stdin.read(escape_seq[0..1])) != 1) return .unknown;
+        if ((try stdin.read(escape_seq[1..2])) != 1) return .unknown;
+
+        if (escape_seq[0] == '[') {
+            switch (escape_seq[1]) {
+                'A' => return .up,
+                'B' => return .down,
+                'C' => return .right,
+                'D' => return .left,
+                else => {}
+            }
+        }
+
         return .unknown;
     }
 

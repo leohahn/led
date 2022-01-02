@@ -84,16 +84,16 @@ fn processInput(screen: *Screen) !bool {
         .q => {
             return true;
         },
-        .j => {
+        .j, .down => {
             screen.cursor_position = screen.cursor_position.down(screen);
         },
-        .k => {
+        .k, .up => {
             screen.cursor_position = screen.cursor_position.up();
         },
-        .h => {
+        .h, .left => {
             screen.cursor_position = screen.cursor_position.left();
         },
-        .l => {
+        .l, .right => {
             screen.cursor_position = screen.cursor_position.right(screen);
         },
         else => {},
