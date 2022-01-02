@@ -1,8 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-pub const Key = enum(i16) {
+pub const Key = enum(i32) {
     const Self = @This();
+
+    unknown = -1,
 
     a = 'a',
     b = 'b',
@@ -100,14 +102,12 @@ pub const Key = enum(i16) {
     backslash = '\\',
     space = ' ',
 
-    up = 256, 
-    down = 257, 
-    left = 258, 
-    right = 259, 
+    up = 1000,
+    down = 1001,
+    left = 1002,
+    right = 1003,
 
     esc = 27,
-
-    unknown = 260,
 
     fn isDigit(self: Self) bool {
         return switch (self) {
@@ -138,7 +138,7 @@ pub fn readInputEvent() !?Key {
                 'B' => return .down,
                 'C' => return .right,
                 'D' => return .left,
-                else => {}
+                else => {},
             }
         }
 
@@ -245,7 +245,7 @@ pub fn getWindowSize() !WindowSize {
 
     if (std.c.ioctl(stdout.handle, std.c.T.IOCGWINSZ, &ws) == -1 or ws.ws_col == 0) {
         _ = try stdout.write("\x1b[999C\x1b[999B");
-        const cursor_pos = try getCursorPosition(); 
+        const cursor_pos = try getCursorPosition();
         return WindowSize{
             .lines = cursor_pos.line,
             .cols = cursor_pos.col,
@@ -312,4 +312,3 @@ pub const RawMode = struct {
         try std.os.tcsetattr(std.io.getStdIn().handle, .FLUSH, self.original_terminfo);
     }
 };
-

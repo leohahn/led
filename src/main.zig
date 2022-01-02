@@ -56,7 +56,7 @@ const Screen = struct {
         try terminal.useAlternateScreenBuffer(writer);
         const size = try terminal.getWindowSize();
 
-        return Self {
+        return Self{
             .lines = size.lines,
             .cols = size.cols,
             .raw_mode = raw_mode,
