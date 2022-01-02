@@ -54,7 +54,6 @@ const Screen = struct {
     fn init(writer: anytype) !Self {
         const raw_mode = try terminal.RawMode.enable();
         try terminal.useAlternateScreenBuffer(writer);
-
         const size = try terminal.getWindowSize();
 
         return Self {
@@ -69,7 +68,6 @@ const Screen = struct {
     }
 
     fn deinit(self: *const Self) !void {
-        _ = self;
         try terminal.leaveAlternateScreenBuffer();
         try self.raw_mode.disable();
     }
@@ -105,10 +103,7 @@ fn processInput(screen: *Screen) !bool {
 }
 
 fn drawBufferContents(writer: anytype, screen: Screen) !void {
-    try terminal.moveCursorToPosition(writer, .{
-        .line = 0,
-        .col = 0,
-    });
+    try terminal.moveCursorToPosition(writer, .{ .line = 0, .col = 0 });
 
     var y: usize = 0;
     while (y < screen.lines) : (y += 1) {
