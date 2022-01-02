@@ -96,6 +96,30 @@ fn processInput(screen: *Screen) !bool {
         .l, .right => {
             screen.cursor_position = screen.cursor_position.right(screen);
         },
+        .page_up => {
+            var times = screen.lines;
+            while (times > 0) : (times -= 1) {
+                screen.cursor_position = screen.cursor_position.up();
+            }
+        },
+        .page_down => {
+            var times = screen.lines;
+            while (times > 0) : (times -= 1) {
+                screen.cursor_position = screen.cursor_position.down(screen);
+            }
+        },
+        .home => {
+            var times = screen.cols;
+            while (times > 0) : (times -= 1) {
+                screen.cursor_position = screen.cursor_position.left();
+            }
+        },
+        .end => {
+            var times = screen.cols;
+            while (times > 0) : (times -= 1) {
+                screen.cursor_position = screen.cursor_position.right(screen);
+            }
+        },
         else => {},
     }
 

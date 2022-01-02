@@ -107,6 +107,12 @@ pub const Key = enum(i32) {
     left = 1002,
     right = 1003,
 
+    del = 1004,
+    page_up = 1005,
+    page_down = 1006,
+    home = 1007,
+    end = 1008,
+
     esc = 27,
 
     fn isDigit(self: Self) bool {
@@ -127,18 +133,41 @@ pub fn readInputEvent() !?Key {
     }
 
     if (buffer[0] == '\x1b') {
-        var escape_seq = [1]u8{0} ** 2;
+        var escape_seq = [1]u8{0} ** 3;
 
         if ((try stdin.read(escape_seq[0..1])) != 1) return .unknown;
         if ((try stdin.read(escape_seq[1..2])) != 1) return .unknown;
 
         if (escape_seq[0] == '[') {
+            if (escape_seq[1] >= '0' and escape_seq[1] <= '9') {
+                if ((try stdin.read(escape_seq[2..3])) != 1) return .unknown;
+                if (escape_seq[2] == '~') {
+                    switch (escape_seq[1]) {
+                        '1' => return .home,
+                        '4' => return .end,
+                        '5' => return .page_up,
+                        '6' => return .page_down,
+                        '7' => return .home,
+                        '8' => return .end,
+                        else => return .unknown,
+                    }
+                }
+            } else {
+                switch (escape_seq[1]) {
+                    'A' => return .up,
+                    'B' => return .down,
+                    'C' => return .right,
+                    'D' => return .left,
+                    'H' => return .home,
+                    'F' => return .end,
+                    else => return .unknown,
+                }
+            }
+        } else if (escape_seq[0] == '0') {
             switch (escape_seq[1]) {
-                'A' => return .up,
-                'B' => return .down,
-                'C' => return .right,
-                'D' => return .left,
-                else => {},
+                'H' => return .home,
+                'F' => return.end,
+                else => return .unknown,
             }
         }
 
