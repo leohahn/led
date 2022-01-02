@@ -298,6 +298,3 @@ pub const RawMode = struct {
     }
 };
 
-pub fn draw_contents(string: []const u8) void {
-    std.log.info("DRAW CONTENTS:\n{s}\n", .{string});
-}
