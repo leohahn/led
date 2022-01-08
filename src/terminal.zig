@@ -167,7 +167,7 @@ pub fn readInputEvent() !?Key {
         } else if (escape_seq[0] == '0') {
             switch (escape_seq[1]) {
                 'H' => return .home,
-                'F' => return.end,
+                'F' => return .end,
                 else => return .unknown,
             }
         }
