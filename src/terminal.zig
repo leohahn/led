@@ -144,6 +144,7 @@ pub fn readInputEvent() !?Key {
                 if (escape_seq[2] == '~') {
                     switch (escape_seq[1]) {
                         '1' => return .home,
+                        '3' => return .del,
                         '4' => return .end,
                         '5' => return .page_up,
                         '6' => return .page_down,

@@ -1,9 +1,11 @@
 const std = @import("std");
 const piece_table = @import("./piece_table.zig");
 const terminal = @import("./terminal.zig");
+const assert = std.debug.assert;
 
 const VERSION = "0.1.0";
 
+const Allocator = std.mem.Allocator;
 const PieceTable = piece_table.PieceTable;
 
 const CursorPosition = struct {
@@ -42,14 +44,12 @@ const CursorPosition = struct {
 };
 
 const Screen = struct {
-    const Self = @This();
-
     lines: i32,
     cols: i32,
-
     cursor_position: CursorPosition,
-
     raw_mode: terminal.RawMode,
+
+    const Self = @This();
 
     fn init(writer: anytype) !Self {
         const raw_mode = try terminal.RawMode.enable();
@@ -126,31 +126,43 @@ fn processInput(screen: *Screen) !bool {
     return false;
 }
 
-fn drawBufferContents(writer: anytype, screen: Screen) !void {
+fn findCharInString(slice: []const u8, char: u8) ?usize {
+    for (slice) |c, i| {
+        if (char == c) {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn drawBuffer(writer: anytype, screen: Screen, buffer: Buffer) !void {
     try terminal.moveCursorToPosition(writer, .{ .line = 0, .col = 0 });
+    _ = screen;
+    _ = buffer;
 
-    var y: usize = 0;
-    while (y < screen.lines) : (y += 1) {
-        if (y == @divFloor(screen.lines, 3)) {
-            var buf = [1]u8{0} ** 80;
-            const welcome_message = try std.fmt.bufPrint(&buf, "Hed editor -- version {s}", .{VERSION});
+    var line: i32 = 0;
+    var remaining_string = buffer.contents;
 
-            var padding: i32 = @divFloor(@intCast(i32, screen.cols) - @intCast(i32, welcome_message.len), 2);
-
-            _ = try writer.write("~");
-            padding -= 1;
-
-            while (padding > 0) : (padding -= 1) {
-                _ = try writer.write(" ");
-            }
-            _ = try writer.write(welcome_message);
-        } else {
-            _ = try writer.write("~");
+    while (line < screen.lines) : (line += 1) {
+        if (remaining_string.len == 0) {
+            _ = try writer.write("~\r\n");
+            continue;
         }
 
-        if (y < screen.lines - 1) {
+        const index = findCharInString(remaining_string, '\n');
+
+        _ = try writer.write(" ");
+
+        if (index == null) {
+            _ = try writer.write(remaining_string);
+            remaining_string = "";
             _ = try writer.write("\r\n");
+            continue;
         }
+
+        _ = try writer.write(remaining_string[0..index.?]);
+        _ = try writer.write("\r\n");
+        remaining_string = remaining_string[index.? + 1..remaining_string.len];
     }
 
     try terminal.moveCursorToPosition(writer, .{
@@ -159,27 +171,135 @@ fn drawBufferContents(writer: anytype, screen: Screen) !void {
     });
 }
 
+const Args = struct {
+    const Self = @This();
+
+    allocator: Allocator,
+    file_path: ?[]const u8,
+
+    fn init(allocator: Allocator) !Self {
+        var args_it = std.process.args();
+        var file_path: ?[]const u8 = null;
+
+        // Skip first parameter since it is always the program name.
+        _ = args_it.skip();
+
+        while (args_it.next(allocator)) |arg_err| {
+            const arg = try arg_err; 
+            file_path = arg;
+            break;
+        }
+
+        return Args{
+            .allocator = allocator,
+            .file_path = file_path,
+        };
+    }
+
+    fn deinit(self: *Self) void {
+        if (self.file_path != null) self.allocator.free(self.file_path.?);
+    }
+};
+
+fn createPaddingString(allocator: Allocator, padding_len: i32) ![]const u8 {
+    assert(padding_len > 0);
+    const string = try allocator.alloc(u8, @intCast(usize, padding_len));
+    std.mem.set(u8, string, ' ');
+    return string;
+}
+
+const Buffer = struct {
+    allocator: Allocator,
+    piece_table: PieceTable,
+    contents: []const u8,
+    read_only: bool,
+
+    const Self = @This();
+
+    fn welcome(allocator: Allocator, screen: Screen) !Self {
+        const max_col_len = 17;
+        const padding_len = @divFloor(screen.cols - max_col_len, 2);
+
+        const padding = try createPaddingString(allocator, padding_len);
+        defer allocator.free(padding);
+
+        var buf = try allocator.alloc(u8, 2048);
+        defer allocator.free(buf);
+
+        const message = try std.fmt.bufPrint(
+            buf,
+            \\
+            \\
+            \\{s} _             _ 
+            \\{s}| |    ___  __| |
+            \\{s}| |   / _ \/ _` |
+            \\{s}| |__|  __/ (_| |
+            \\{s}|_____\___|\__,_|
+            \\
+            \\{s}  version {s}
+        , .{padding, padding, padding, padding, padding, padding, VERSION});
+        
+        var self = try initFromString(allocator, message);
+        return self;
+    }
+
+    fn initFromString(allocator: Allocator, string: []const u8) !Self {
+        var table = try PieceTable.initFromString(allocator, string);
+        var contents = try table.toString(allocator);
+
+        return Self{
+            .allocator = allocator, 
+            .piece_table = table,
+            .contents = contents,
+            .read_only = false,
+        };
+    }
+
+    fn initFromFile(allocator: Allocator, file: std.fs.File) !Self {
+        var table = try PieceTable.initFromFile(allocator, file);
+        var contents = try table.toString(allocator);
+
+        return Self{
+            .allocator = allocator, 
+            .piece_table = table,
+            .contents = contents,
+            .read_only = false,
+        };
+    }
+
+    fn deinit(self: *Self) void {
+        self.allocator.free(self.contents);
+        self.piece_table.deinit();
+    }
+};
+
 pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+
+    var args = try Args.init(allocator);
+    defer args.deinit();
+
     var cwd = std.fs.cwd();
-    var file = try cwd.openFile("src/main.zig", .{ .read = true });
 
-    var table = try PieceTable.initFromFile(gpa.allocator(), file);
-    defer table.deinit();
-
-    const table_contents = try table.toString(gpa.allocator());
-    defer gpa.allocator().free(table_contents);
-
-    var frame = std.ArrayList(u8).init(gpa.allocator());
+    var frame = std.ArrayList(u8).init(allocator);
     defer frame.deinit();
 
     var screen = try Screen.init(frame.writer());
     defer screen.deinit() catch {};
 
+    var buffer: Buffer = undefined;
+    if (args.file_path != null) {
+        var file = try cwd.openFile(args.file_path.?, .{ .read = true });
+        buffer = try Buffer.initFromFile(allocator, file);
+    } else {
+        buffer = try Buffer.welcome(allocator, screen);
+    }
+
     while (true) {
         try terminal.hideCursor(frame.writer());
         try terminal.refreshScreen(frame.writer());
-        try drawBufferContents(frame.writer(), screen);
+        try drawBuffer(frame.writer(), screen, buffer);
         try terminal.showCursor(frame.writer());
 
         const stdout = std.io.getStdOut();
