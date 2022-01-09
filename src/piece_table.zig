@@ -20,8 +20,8 @@ const Piece = struct {
 
     fn getBuffer(self: *const Self, buffers: Buffers) []const u8 {
         return switch (self.buffer) {
-            .original => buffers.original[self.start..self.len],
-            .append => buffers.append.items[self.start..self.len],
+            .original => buffers.original[self.start..self.start + self.len],
+            .append => buffers.append.items[self.start..self.start + self.len],
         };
     }
 };
@@ -121,6 +121,8 @@ pub const PieceTable = struct {
         if (!std.unicode.utf8ValidateSlice(slice)) {
             return error.InvalidUtf8Slice;
         }
+
+        std.log.info("inserting into pos {d}", .{position});
 
         const piece_position = self.findPosition(position) orelse return error.InvalidPosition;
 
@@ -287,6 +289,26 @@ test "can insert into the end of a piece table" {
     try std.testing.expectEqualStrings("NEW", pt.pieces.items[1].getBuffer(pt.buffers));
 
     try assertPieceTableContents(&pt, "The dog is a nice animal.\nThe cat is also cool.NEW");
+}
+
+test "can insert into the beginning" {
+    var pt = try PieceTable.initFromString(std.testing.allocator,
+        \\The dog is a nice animal.
+        \\The cat is also cool.
+    );
+    defer pt.deinit();
+
+    try assertPieceTableContents(&pt, "The dog is a nice animal.\nThe cat is also cool.");
+
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+    try pt.insert(0, "a");
+
+    try assertPieceTableContents(&pt, "aaaaaaaThe dog is a nice animal.\nThe cat is also cool.");
 }
 
 test "can create a piece table and use itemAt" {

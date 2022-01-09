@@ -36,11 +36,11 @@ const Screen = struct {
 fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHandle) !bool {
     const ev = try terminal.readInputEvent();
     if (ev == null) {
-        std.log.info("timeout", .{});
         return false;
     }
 
-    const buffer = resources.getBuffer(bh);
+    var buffer = resources.getBuffer(bh);
+    var table = resources.getTable(buffer.th);
 
     switch (ev.?) {
         .q => {
@@ -82,6 +82,10 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
                 buffer.cursorRight(screen);
             }
         },
+        .a => {
+            try table.insert(buffer.cursor.table_offset, "a");
+            try buffer.updateContents(table);
+        },
         else => {},
     }
 
@@ -99,32 +103,41 @@ fn findCharInString(slice: []const u8, char: u8) ?usize {
 
 fn drawBuffer(writer: anytype, screen: Screen, resources: *const EditorResources, bh: BufferHandle) !void {
     try terminal.moveCursorToPosition(writer, .{ .line = 0, .col = 0 });
-    _ = screen;
 
     const buffer = resources.getBuffer(bh);
+    assert(findCharInString(buffer.contents, '\r') == null);
 
     var line: i32 = 0;
     var remaining_string = buffer.contents;
 
+    const end_file_col = 0;
+    const line_number_col = 1;
+    const start_text_col = line_number_col + 5;
+
     while (line < screen.lines) : (line += 1) {
         if (remaining_string.len == 0) {
-            _ = try writer.write("~\r\n");
+            try terminal.moveCursorToPosition(writer, .{ .line = line, .col = end_file_col });
+            _ = try writer.write("~");
             continue;
         }
 
-        const index = findCharInString(remaining_string, '\n');
+        {
+            try terminal.moveCursorToPosition(writer, .{ .line = line, .col = line_number_col });
+            _ = try writer.print("{d: <5}", .{@intCast(u32, line)});
+        }
 
-        _ = try writer.write(" ");
+        try terminal.moveCursorToPosition(writer, .{ .line = line, .col = start_text_col });
+
+        const index = findCharInString(remaining_string, '\n');
 
         if (index == null) {
             _ = try writer.write(remaining_string);
             remaining_string = "";
-            _ = try writer.write("\r\n");
             continue;
         }
 
         _ = try writer.write(remaining_string[0..index.?]);
-        _ = try writer.write("\r\n");
+
         remaining_string = remaining_string[index.? + 1 .. remaining_string.len];
     }
 
@@ -177,6 +190,7 @@ const TableHandle = struct { val: u32 = 0 };
 const Cursor = struct {
     line: i32,
     col: i32,
+    table_offset: u32,
 };
 
 fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResources) !BufferHandle {
@@ -208,27 +222,33 @@ fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResourc
 
 const Buffer = struct {
     allocator: Allocator,
-    table_handle: TableHandle,
+    th: TableHandle,
     contents: []const u8,
     read_only: bool,
     cursor: Cursor,
 
     const Self = @This();
 
-    fn init(allocator: Allocator, table_handle: TableHandle, resources: *const EditorResources) !Self {
-        var table = resources.getTable(table_handle);
+    fn init(allocator: Allocator, th: TableHandle, resources: *const EditorResources) !Self {
+        var table = resources.getTable(th);
         var contents = try table.toString(allocator);
 
         return Self{
             .allocator = allocator,
-            .table_handle = table_handle,
+            .th = th,
             .contents = contents,
             .read_only = false,
             .cursor = .{
                 .line = 0,
                 .col = 1,
+                .table_offset = 0,
             },
         };
+    }
+
+    fn updateContents(self: *Self, table: *PieceTable) !void {
+        self.allocator.free(self.contents);
+        self.contents = try table.toString(self.allocator);
     }
 
     fn deinit(self: *Self) void {
@@ -310,16 +330,7 @@ const EditorResources = struct {
     }
 };
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
-        .retain_metadata = true,
-        .never_unmap = true,
-    }){};
-    var allocator = gpa.allocator();
-
-    var args = try Args.init(allocator);
-    defer args.deinit();
-
+fn run(allocator: Allocator, args: Args) anyerror!void {
     var cwd = std.fs.cwd();
 
     var resources = try EditorResources.init(allocator);
@@ -340,7 +351,9 @@ pub fn main() anyerror!void {
         bh = try welcomeBuffer(allocator, screen, &resources);
     }
 
-    while (true) {
+    var nrun: u64 = 0;
+
+    while (true) : (nrun += 1) {
         try terminal.hideCursor(frame.writer());
         try terminal.refreshScreen(frame.writer());
         try drawBuffer(frame.writer(), screen, &resources, bh);
@@ -348,11 +361,25 @@ pub fn main() anyerror!void {
 
         const stdout = std.io.getStdOut();
         _ = try stdout.write(frame.items);
-
         frame.clearRetainingCapacity();
 
         if (try processInput(&screen, &resources, bh)) {
             break;
         }
     }
+}
+
+pub fn main() anyerror!void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{
+        .retain_metadata = true,
+        .never_unmap = true,
+    }){};
+    var allocator = gpa.allocator();
+
+    var args = try Args.init(allocator);
+    defer args.deinit();
+
+    run(allocator, args) catch |err| {
+        std.log.err("run failed: {s}", .{err});
+    };
 }
