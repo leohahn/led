@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 const Position = struct {
     line: i32,
@@ -65,45 +66,6 @@ fn countLinesInString(str: []const u8) i32 {
     return count;
 }
 
-// fn findNthLineInString(str: []const u8, line: u32) ?u32 {
-//     var acc: u32 = 1;
-
-//     var it = std.unicode.Utf8Iterator{
-//         .bytes = str,
-//         .i = 0,
-//     };
-
-//     while (true) {
-//         if (acc == line) {
-//             return index;
-//         }
-        
-//     }
-
-//     var rune_i: u32 = 0;
-//     var it = std.unicode.Utf8Iterator{
-//         .bytes = piece_buffer,
-//         .i = 0,
-//     };
-//     while (rune_i != rune_position) : (rune_i += 1) {
-//         if (it.nextCodepoint() == null) {
-//             return null;
-//         }
-//     }
-//     return @intCast(u32, it.i);
-
-//     for (str) |c, index| {
-//         if (acc == line) {
-//             return index;
-//         }
-
-//         if (c == '\n') {
-//             acc += 1;
-//         }
-//     }
-//     return null;
-// }
-
 fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
     var current_line: i32 = 0;
     var current_col: i32 = 0;
@@ -112,8 +74,6 @@ fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
         .i = 0,
         .bytes = string,
     };
-
-    // const text = "the big dog\njumped over the laze\n\ndog\n";
 
     while (true) {
         const codepoint_slice = it.peek(1);
@@ -148,7 +108,7 @@ fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
         _ = it.nextCodepoint() orelse break;
     }
 
-    std.debug.assert(current_line == line);
+    assert(current_line == line);
     return current_col;
 }
 
@@ -284,18 +244,15 @@ pub const PieceTable = struct {
         }
     }
 
-    pub fn lineAbove(self: *const Self, line: i32, col: i32) ?Position {
-        std.debug.assert(line >= 0);
-        std.debug.assert(col >= 0);
-
-        if (line == 0) {
-            return Position{ .line = line, .col = col };
+    fn moveToDesiredLineFromPosition(self: *const Self, desired_line: i32, col: i32) ?Position {
+        if (desired_line < 0) {
+            return null;
         }
+
+        assert(col >= 0);
 
         var maybe_piece_index: ?usize = null;
         var accumulated_line: i32 = 0;
-
-        const desired_line: i32 = line - 1;
 
         for (self.pieces.items) |piece, index| {
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
@@ -315,6 +272,16 @@ pub const PieceTable = struct {
             .line = desired_line,
             .col = new_col,
         };
+    }
+
+    pub fn lineBelow(self: *const Self, line: i32, col: i32) ?Position {
+        const desired_line = line + 1;
+        return self.moveToDesiredLineFromPosition(desired_line, col);
+    }
+
+    pub fn lineAbove(self: *const Self, line: i32, col: i32) ?Position {
+        const desired_line = line - 1;
+        return self.moveToDesiredLineFromPosition(desired_line, col);
     }
 
     fn addToAppendBuffer(self: *Self, slice: []const u8) !Piece {

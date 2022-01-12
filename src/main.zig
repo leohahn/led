@@ -61,7 +61,7 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
             return true;
         },
         .j, .down => {
-            buffer.cursorDown(table, screen);
+            buffer.cursorDown(table, screen.window);
         },
         .k, .up => {
             buffer.cursorUp(table, screen.window);
@@ -81,7 +81,7 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
         .page_down => {
             var times = screen.window.line_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorDown(table, screen);
+                buffer.cursorDown(table, screen.window);
             }
         },
         .home => {
@@ -280,29 +280,26 @@ const Buffer = struct {
         self.allocator.free(self.contents);
     }
 
-    fn cursorDown(self: *Self, table: *const PieceTable, screen: *const Screen) void {
-        _ = table;
-        self.cursor.line = std.math.min(self.cursor.line + 1, screen.window.line_count - 1);
-    }
-
-    fn cursorUp(self: *Self, table: *const PieceTable, window: Window) void {
-        log.debugf("=============", .{});
-        log.debugf("cursorUp: line={d} col={d}", .{self.cursor.line, self.cursor.col});
-
+    fn cursorDown(self: *Self, table: *const PieceTable, window: Window) void {
         const mapped_line: i32 = self.cursor.line - window.start_line;
         const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
-        log.debugf("mapped line={d} col={d}", .{mapped_line, mapped_col});
+        const maybe_pos = table.lineBelow(mapped_line, mapped_col);
+        const pos = maybe_pos orelse return;
+
+        self.cursor.line = pos.line + window.start_line;
+        self.cursor.col = pos.col + window.start_col + self.properties.text_col;
+    }
+
+    fn cursorUp(self: *Self, table: *const PieceTable, window: Window) void {
+        const mapped_line: i32 = self.cursor.line - window.start_line;
+        const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
         const maybe_pos = table.lineAbove(mapped_line, mapped_col);
         const pos = maybe_pos orelse return;
 
-        log.debugf("posBuffer line={d} col={d}", .{pos.line, pos.col});
-
         self.cursor.line = pos.line + window.start_line;
         self.cursor.col = pos.col + window.start_col + self.properties.text_col;
-
-        log.debugf("newPos line={d} col={d}", .{self.cursor.line, self.cursor.col});
     }
 
     fn cursorLeft(self: *Self, table: *const PieceTable) void {
