@@ -244,7 +244,7 @@ pub const PieceTable = struct {
         }
     }
 
-    fn moveToDesiredLineFromPosition(self: *const Self, desired_line: i32, col: i32) ?Position {
+    pub fn lineAt(self: *const Self, desired_line: i32, col: i32) ?Position {
         if (desired_line < 0) {
             return null;
         }
@@ -272,16 +272,6 @@ pub const PieceTable = struct {
             .line = desired_line,
             .col = new_col,
         };
-    }
-
-    pub fn lineBelow(self: *const Self, line: i32, col: i32) ?Position {
-        const desired_line = line + 1;
-        return self.moveToDesiredLineFromPosition(desired_line, col);
-    }
-
-    pub fn lineAbove(self: *const Self, line: i32, col: i32) ?Position {
-        const desired_line = line - 1;
-        return self.moveToDesiredLineFromPosition(desired_line, col);
     }
 
     fn addToAppendBuffer(self: *Self, slice: []const u8) !Piece {
@@ -496,7 +486,7 @@ test "clampColumnInLine" {
     try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 11));
 }
 
-test "lineAbove" {
+test "lineAt" {
     const expectEqual = std.testing.expectEqual;
 
     const str = 
@@ -510,19 +500,20 @@ test "lineAbove" {
     defer pt.deinit();
 
     {
-        const pos = pt.lineAbove(0, 0) orelse unreachable;
-        try expectEqual(pos, .{ .line = 0, .col = 0 });
+        const pos = pt.lineAt(-1, 0);
+        try expectEqual(pos, null);
     } 
     {
-        const pos = pt.lineAbove(1, 0) orelse unreachable;
+        const pos = pt.lineAt(0, 0) orelse unreachable;
         try expectEqual(pos, .{ .line = 0, .col = 0 });
     }
     {
-        const pos = pt.lineAbove(2, 0) orelse unreachable;
+        const pos = pt.lineAt(1, 0) orelse unreachable;
         try expectEqual(pos, .{ .line = 1, .col = 0 });
     }
     {
-        const pos = pt.lineAbove(3, 4) orelse unreachable;
+        const pos = pt.lineAt(2, 4) orelse unreachable;
         try expectEqual(pos, .{ .line = 2, .col = 0 });
     }
 }
+

@@ -154,7 +154,7 @@ fn drawWindow(writer: anytype, window: Window, resources: *const EditorResources
 
     try terminal.moveCursorToPosition(writer, .{
         .line = buffer.cursor.line,
-        .col = buffer.cursor.col,
+        .col = buffer.cursor.render_col,
     });
 }
 
@@ -201,6 +201,7 @@ const TableHandle = struct { val: u32 = 0 };
 const Cursor = struct {
     line: i32,
     col: i32,
+    render_col: i32,
     table_offset: u32,
 };
 
@@ -266,6 +267,7 @@ const Buffer = struct {
             .cursor = .{
                 .line = 0,
                 .col = text_col,
+                .render_col = text_col,
                 .table_offset = 0,
             },
         };
@@ -284,22 +286,22 @@ const Buffer = struct {
         const mapped_line: i32 = self.cursor.line - window.start_line;
         const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
-        const maybe_pos = table.lineBelow(mapped_line, mapped_col);
+        const maybe_pos = table.lineAt(mapped_line + 1, mapped_col);
         const pos = maybe_pos orelse return;
 
         self.cursor.line = pos.line + window.start_line;
-        self.cursor.col = pos.col + window.start_col + self.properties.text_col;
+        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
     }
 
     fn cursorUp(self: *Self, table: *const PieceTable, window: Window) void {
         const mapped_line: i32 = self.cursor.line - window.start_line;
         const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
-        const maybe_pos = table.lineAbove(mapped_line, mapped_col);
+        const maybe_pos = table.lineAt(mapped_line - 1, mapped_col);
         const pos = maybe_pos orelse return;
 
         self.cursor.line = pos.line + window.start_line;
-        self.cursor.col = pos.col + window.start_col + self.properties.text_col;
+        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
     }
 
     fn cursorLeft(self: *Self, table: *const PieceTable) void {
@@ -318,6 +320,7 @@ const Buffer = struct {
 
         self.cursor.table_offset -= 1;
         self.cursor.col -= 1;
+        self.cursor.render_col = self.cursor.col;
     }
 
     fn cursorRight(self: *Self, table: *const PieceTable) void {
@@ -332,6 +335,7 @@ const Buffer = struct {
 
         self.cursor.table_offset += 1;
         self.cursor.col += 1;
+        self.cursor.render_col = self.cursor.col;
     }
 };
 
