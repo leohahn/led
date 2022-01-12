@@ -1,6 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Position = struct {
+    line: i32,
+    col: i32,
+};
+
 const Buffer = enum {
     original,
     append,
@@ -18,10 +23,12 @@ const Piece = struct {
     len: u32,
     buffer: Buffer,
 
+    line_count: i32,
+
     fn getBuffer(self: *const Self, buffers: Buffers) []const u8 {
         return switch (self.buffer) {
-            .original => buffers.original[self.start..self.start + self.len],
-            .append => buffers.append.items[self.start..self.start + self.len],
+            .original => buffers.original[self.start .. self.start + self.len],
+            .append => buffers.append.items[self.start .. self.start + self.len],
         };
     }
 };
@@ -46,6 +53,103 @@ fn findBytePositionFromRune(rune_position: u32, piece_buffer: []const u8) ?u32 {
         }
     }
     return @intCast(u32, it.i);
+}
+
+fn countLinesInString(str: []const u8) i32 {
+    var count: i32 = 0;
+    for (str) |c| {
+        if (c == '\n') {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+// fn findNthLineInString(str: []const u8, line: u32) ?u32 {
+//     var acc: u32 = 1;
+
+//     var it = std.unicode.Utf8Iterator{
+//         .bytes = str,
+//         .i = 0,
+//     };
+
+//     while (true) {
+//         if (acc == line) {
+//             return index;
+//         }
+        
+//     }
+
+//     var rune_i: u32 = 0;
+//     var it = std.unicode.Utf8Iterator{
+//         .bytes = piece_buffer,
+//         .i = 0,
+//     };
+//     while (rune_i != rune_position) : (rune_i += 1) {
+//         if (it.nextCodepoint() == null) {
+//             return null;
+//         }
+//     }
+//     return @intCast(u32, it.i);
+
+//     for (str) |c, index| {
+//         if (acc == line) {
+//             return index;
+//         }
+
+//         if (c == '\n') {
+//             acc += 1;
+//         }
+//     }
+//     return null;
+// }
+
+fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
+    var current_line: i32 = 0;
+    var current_col: i32 = 0;
+
+    var it = std.unicode.Utf8Iterator{
+        .i = 0,
+        .bytes = string,
+    };
+
+    // const text = "the big dog\njumped over the laze\n\ndog\n";
+
+    while (true) {
+        const codepoint_slice = it.peek(1);
+        if (codepoint_slice.len == 0) {
+            break;
+        }
+        const current_codepoint = std.unicode.utf8Decode(codepoint_slice) catch unreachable;
+
+        if (current_line < line) {
+            if (current_codepoint == @as(u21, '\n')) {
+                current_line += 1;
+                current_col = 0;
+            } else {
+                current_col += 1;
+            }
+            _ = it.nextCodepoint() orelse break;
+            continue;
+        }
+
+        if (current_codepoint == @as(u21, '\n')) {
+            if (current_col > 1) {
+                current_col -= 1;
+            }
+            break;
+        }
+
+        if (current_col == col) {
+            break;
+        }
+
+        current_col += 1;
+        _ = it.nextCodepoint() orelse break;
+    }
+
+    std.debug.assert(current_line == line);
+    return current_col;
 }
 
 pub const PieceTable = struct {
@@ -79,6 +183,7 @@ pub const PieceTable = struct {
             .start = 0,
             .len = @intCast(u32, original_buffer.len),
             .buffer = Buffer.original,
+            .line_count = countLinesInString(original_buffer),
         });
 
         return Self{
@@ -122,11 +227,9 @@ pub const PieceTable = struct {
             return error.InvalidUtf8Slice;
         }
 
-        std.log.info("inserting into pos {d}", .{position});
-
         const piece_position = self.findPosition(position) orelse return error.InvalidPosition;
 
-        var inserted_piece: Piece = try self.add_to_append_buffer(slice);
+        var inserted_piece: Piece = try self.addToAppendBuffer(slice);
 
         switch (piece_position) {
             .end_of_buffer => {
@@ -142,15 +245,21 @@ pub const PieceTable = struct {
                     return;
                 }
 
+                const piece_buffer = piece.getBuffer(self.buffers);
+
                 const piece_before = Piece{
                     .start = 0,
                     .len = inside_piece.offset,
                     .buffer = piece.buffer,
+                    .line_count = countLinesInString(piece_buffer[0..inside_piece.offset]),
                 };
                 const piece_after = Piece{
                     .start = inside_piece.offset,
                     .len = slice_len - inside_piece.offset,
                     .buffer = piece.buffer,
+                    .line_count = countLinesInString(
+                        piece_buffer[inside_piece.offset .. slice_len - inside_piece.offset],
+                    ),
                 };
 
                 _ = self.pieces.orderedRemove(inside_piece.index);
@@ -161,7 +270,7 @@ pub const PieceTable = struct {
         }
     }
 
-    pub fn itemAt(self: *Self, rune_position: u32) !?u21 {
+    pub fn itemAt(self: *const Self, rune_position: u32) ?u21 {
         const piece_position = self.findPosition(rune_position) orelse return null;
 
         switch (piece_position) {
@@ -175,17 +284,53 @@ pub const PieceTable = struct {
         }
     }
 
-    fn add_to_append_buffer(self: *Self, slice: []const u8) !Piece {
+    pub fn lineAbove(self: *const Self, line: i32, col: i32) ?Position {
+        std.debug.assert(line >= 0);
+        std.debug.assert(col >= 0);
+
+        if (line == 0) {
+            return Position{ .line = line, .col = col };
+        }
+
+        var maybe_piece_index: ?usize = null;
+        var accumulated_line: i32 = 0;
+
+        const desired_line: i32 = line - 1;
+
+        for (self.pieces.items) |piece, index| {
+            const new_accumulated_line: i32 = accumulated_line + piece.line_count;
+            if (new_accumulated_line > desired_line) {
+                maybe_piece_index = index; 
+                break;
+            }
+            accumulated_line = new_accumulated_line;
+        }
+
+        const piece_index = maybe_piece_index orelse return null;
+        const piece_buffer = self.pieces.items[piece_index].getBuffer(self.buffers);
+
+        const new_col = clampColumnInLine(piece_buffer, desired_line - accumulated_line, col);
+
+        return Position{
+            .line = desired_line,
+            .col = new_col,
+        };
+    }
+
+    fn addToAppendBuffer(self: *Self, slice: []const u8) !Piece {
+        const start = @intCast(u32, self.buffers.append.items.len);
+        const slice_len = @intCast(u32, slice.len);
+        try self.buffers.append.appendSlice(self.allocator, slice);
         const inserted_piece = Piece{
             .buffer = Buffer.append,
-            .start = @intCast(u32, self.buffers.append.items.len),
-            .len = @intCast(u32, slice.len),
+            .start = start,
+            .len = slice_len,
+            .line_count = countLinesInString(self.buffers.append.items[start .. start + slice_len]),
         };
-        try self.buffers.append.appendSlice(self.allocator, slice);
         return inserted_piece;
     }
 
-    fn findPosition(self: *Self, rune_position: u32) ?PiecePosition {
+    fn findPosition(self: *const Self, rune_position: u32) ?PiecePosition {
         var piece_index: ?u32 = null;
         var piece_offset: u32 = 0;
 
@@ -321,26 +466,26 @@ test "can create a piece table and use itemAt" {
 
     try std.testing.expectEqual(@as(u32, 408), pt.len());
 
-    var item0 = try pt.itemAt(0);
+    var item0 = pt.itemAt(0);
     try std.testing.expect(item0 != null);
     try std.testing.expectEqual(@as(u21, 'c'), item0.?);
 
-    var item395 = try pt.itemAt(395);
+    var item395 = pt.itemAt(395);
     try std.testing.expect(item395 != null);
     try std.testing.expectEqual(@as(u21, '😀'), item395.?);
 
-    var item407 = try pt.itemAt(407);
+    var item407 = pt.itemAt(407);
     try std.testing.expect(item407 != null);
     try std.testing.expectEqual(@as(u21, '\n'), item407.?);
 
-    var item406 = try pt.itemAt(406);
+    var item406 = pt.itemAt(406);
     try std.testing.expect(item406 != null);
     try std.testing.expectEqual(@as(u21, '}'), item406.?);
 
-    var item408 = try pt.itemAt(408);
+    var item408 = pt.itemAt(408);
     try std.testing.expect(item408 == null);
 
-    var item409 = try pt.itemAt(409);
+    var item409 = pt.itemAt(409);
     try std.testing.expect(item409 == null);
 
     const file_str = try readFileToString(std.testing.allocator, file);
@@ -359,4 +504,58 @@ test "utf8At" {
     try std.testing.expectEqual(smiley, utf8At("😀abcde 😀ghijkl😀", 10));
     try std.testing.expectEqual(smiley, utf8At("😀abcde 😀ghijkl😀", 20));
     try std.testing.expectEqual(a, utf8At("😀abcde 😀ghijkl😀", 4));
+}
+
+test "clampColumnInLine" {
+    const expectEqual = std.testing.expectEqual;
+
+    const text = 
+        \\
+        \\the big dog
+        \\jumped over the lazy
+        \\
+        \\dog
+        \\
+    ;
+    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 0));
+    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 1));
+    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 2));
+    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 3));
+
+    try expectEqual(@as(i32, 0), clampColumnInLine(text, 1, 0));
+    try expectEqual(@as(i32, 1), clampColumnInLine(text, 1, 1));
+    try expectEqual(@as(i32, 2), clampColumnInLine(text, 1, 2));
+    try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 10));
+    try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 11));
+}
+
+test "lineAbove" {
+    const expectEqual = std.testing.expectEqual;
+
+    const str = 
+        \\the cat jumps over the lazy dog.
+        \\I am going to disneyland.
+        \\
+        \\Longer line than above.
+    ;
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    {
+        const pos = pt.lineAbove(0, 0) orelse unreachable;
+        try expectEqual(pos, .{ .line = 0, .col = 0 });
+    } 
+    {
+        const pos = pt.lineAbove(1, 0) orelse unreachable;
+        try expectEqual(pos, .{ .line = 0, .col = 0 });
+    }
+    {
+        const pos = pt.lineAbove(2, 0) orelse unreachable;
+        try expectEqual(pos, .{ .line = 1, .col = 0 });
+    }
+    {
+        const pos = pt.lineAbove(3, 4) orelse unreachable;
+        try expectEqual(pos, .{ .line = 2, .col = 0 });
+    }
 }

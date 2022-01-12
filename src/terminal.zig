@@ -207,6 +207,14 @@ const WindowSize = struct {
 pub const Position = struct {
     line: i32,
     col: i32,
+
+    const Self = @This();
+    pub fn start() Self {
+        return .{
+            .line = 0,
+            .col = 0,
+        };
+    }
 };
 
 fn readKey(key: Key) !void {
@@ -263,8 +271,8 @@ pub fn getCursorPosition() !Position {
     const col = try readIntUntil(i32, Key.R);
 
     return Position{
-        .line = line,
-        .col = col,
+        .line = line - 1,
+        .col = col - 1,
     };
 }
 
