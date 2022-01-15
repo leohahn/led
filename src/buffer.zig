@@ -4,7 +4,7 @@ const ref = @import("./ref.zig");
 const PieceTable = @import("./piece_table.zig").PieceTable;
 const window = @import("./window.zig");
 
-pub const Line = struct { 
+pub const Line = struct {
     val: i32,
 
     const Self = @This();
@@ -17,7 +17,7 @@ pub const Line = struct {
     }
 };
 
-pub const Col = struct { 
+pub const Col = struct {
     val: i32,
 
     const Self = @This();
@@ -67,7 +67,7 @@ pub const Buffer = struct {
     }
 
     pub fn scrollLines(self: *Self, lines: i32, table: *const PieceTable) !void {
-        self.start_line += lines; 
+        self.start_line += lines;
         try self.updateContents(table);
     }
 

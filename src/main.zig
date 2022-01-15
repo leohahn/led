@@ -30,15 +30,18 @@ const Screen = struct {
         return Self{
             .raw_mode = raw_mode,
             .window = Window{
-                .start_col = .{ .val = 0 },
-                .start_line = .{ .val = 0 },
-                .line_count = size.lines,
-                .col_count = size.cols,
+                .boundary = window.TerminalBoundary{
+                    .start_col = .{ .val = 0 },
+                    .start_line = .{ .val = 0 },
+                    .line_count = size.lines,
+                    .col_count = size.cols,
+                },
                 .properties = window.Properties{
                     .markers_col = .{ .val = 0 },
                     .line_number_col = .{ .val = 1 },
                     .buffer_col = buffer_col,
                     .buffer_line = buffer_line,
+                    .status_line = .{ .val = size.lines - 1 },
                 },
             },
         };
@@ -80,7 +83,7 @@ fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
     const pos = maybe_pos orelse return;
 
     buffer.cursor.line = .{ .val = pos.line };
-    buffer.cursor.render_col = . { .val = pos.col };
+    buffer.cursor.render_col = .{ .val = pos.col };
     buffer.cursor.col = buffer.cursor.render_col;
 }
 
@@ -110,25 +113,25 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: ref.Buff
             cursorRight(buffer, table);
         },
         .page_up => {
-            var times = screen.window.line_count;
+            var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
                 cursorUp(buffer, table);
             }
         },
         .page_down => {
-            var times = screen.window.line_count;
+            var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
                 cursorDown(buffer, table);
             }
         },
         .home => {
-            var times = screen.window.col_count;
+            var times = screen.window.boundary.col_count;
             while (times > 0) : (times -= 1) {
                 cursorLeft(buffer, table);
             }
         },
         .end => {
-            var times = screen.window.col_count;
+            var times = screen.window.boundary.col_count;
             while (times > 0) : (times -= 1) {
                 cursorRight(buffer, table);
             }
@@ -153,9 +156,9 @@ fn findCharInString(slice: []const u8, char: u8) ?usize {
 }
 
 fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, bh: ref.BufferHandle) !void {
-    try terminal.moveCursorToPosition(writer, .{ 
-        .line = win.start_line, 
-        .col = win.start_col,
+    try terminal.moveCursorToPosition(writer, .{
+        .line = win.boundary.start_line,
+        .col = win.boundary.start_col,
     });
 
     var buffer = resources.getBuffer(bh);
@@ -187,7 +190,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
         try buffer.scrollLines(lines_to_skip, table);
     }
 
-    var line: terminal.Line = win.start_line;
+    var line: terminal.Line = win.boundary.start_line;
     var remaining_string = buffer.contents;
     var display_line = buffer.start_line + 1;
 
@@ -195,10 +198,19 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
         line = .{ .val = line.val + 1 };
         display_line += 1;
     }) {
+        if (win.isStatusLine(line)) {
+            try terminal.moveCursorToPosition(writer, .{
+                .line = line,
+                .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
+            });
+            _ = try writer.write("STATUS LINE");
+            continue;
+        }
+
         if (remaining_string.len == 0) {
             try terminal.moveCursorToPosition(writer, .{
                 .line = line,
-                .col = win.properties.markers_col.toTerminalCol(win.start_col),
+                .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
             });
             _ = try writer.write("~");
             continue;
@@ -208,14 +220,14 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
             // Draw the line numbers
             try terminal.moveCursorToPosition(writer, .{
                 .line = line,
-                .col = win.properties.line_number_col.toTerminalCol(win.start_col),
+                .col = win.properties.line_number_col.toTerminalCol(win.boundary.start_col),
             });
             _ = try writer.print("{d: <5}", .{@intCast(u32, display_line)});
         }
 
-        try terminal.moveCursorToPosition(writer, .{ 
-            .line = line, 
-            .col = win.properties.buffer_col.toTerminalCol(win.start_col),
+        try terminal.moveCursorToPosition(writer, .{
+            .line = line,
+            .col = win.properties.buffer_col.toTerminalCol(win.boundary.start_col),
         });
 
         const index = findCharInString(remaining_string, '\n') orelse {
@@ -233,10 +245,10 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
         .line = buffer.cursor.line
             .sub(.{ .val = buffer.start_line })
             .toWindowLine(win.properties.buffer_line)
-            .toTerminalLine(win.start_line),
+            .toTerminalLine(win.boundary.start_line),
         .col = buffer.cursor.render_col
             .toWindowCol(win.properties.buffer_col)
-            .toTerminalCol(win.start_col),
+            .toTerminalCol(win.boundary.start_col),
     });
 }
 
@@ -279,7 +291,7 @@ fn createPaddingString(allocator: Allocator, padding_len: i32) ![]const u8 {
 
 fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResources) !ref.BufferHandle {
     const max_col_len = 17;
-    const padding_len = @divFloor(screen.window.col_count - max_col_len, 2);
+    const padding_len = @divFloor(screen.window.boundary.col_count - max_col_len, 2);
 
     const padding = try createPaddingString(allocator, padding_len);
     defer allocator.free(padding);

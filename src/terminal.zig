@@ -212,7 +212,7 @@ pub const Position = struct {
     pub fn start() Self {
         return .{
             .line = .{ .val = 0 },
-            .col = .{ .val = 0 }, 
+            .col = .{ .val = 0 },
         };
     }
 };

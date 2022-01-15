@@ -1,6 +1,6 @@
 const terminal = @import("./terminal.zig");
 
-pub const Line = struct { 
+pub const Line = struct {
     val: i32,
 
     const Self = @This();
@@ -11,7 +11,7 @@ pub const Line = struct {
     }
 };
 
-pub const Col = struct { 
+pub const Col = struct {
     val: i32,
 
     const Self = @This();
@@ -28,20 +28,31 @@ pub const Properties = struct {
 
     buffer_line: Line,
     buffer_col: Col,
+
+    status_line: Line,
 };
 
-pub const Window = struct {
+pub const TerminalBoundary = struct {
     start_col: terminal.Col,
     start_line: terminal.Line,
     line_count: i32,
     col_count: i32,
+};
+
+pub const Window = struct {
     properties: Properties,
+    boundary: TerminalBoundary,
 
     const Self = @This();
 
     pub fn lastTerminalLine(self: *const Self) terminal.Line {
         return .{
-            .val = self.start_line.val + self.line_count - 1,
+            .val = self.boundary.start_line.val + self.boundary.line_count - 1,
         };
+    }
+
+    pub fn isStatusLine(self: *const Self, line: terminal.Line) bool {
+        const wl = Line{ .val = line.val - self.boundary.start_line.val };
+        return wl.val == self.properties.status_line.val;
     }
 };
