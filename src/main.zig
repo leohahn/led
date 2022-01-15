@@ -1,8 +1,12 @@
 const std = @import("std");
 const piece_table = @import("./piece_table.zig");
+const editor_resources = @import("./editor_resources.zig");
+const EditorResources = editor_resources.EditorResources;
 const terminal = @import("./terminal.zig");
 const log = @import("./log.zig");
+const Buffer = @import("./buffer.zig").Buffer;
 const assert = std.debug.assert;
+const ref = @import("./ref.zig");
 
 const VERSION = "0.1.0";
 
@@ -47,7 +51,57 @@ const Screen = struct {
     }
 };
 
-fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHandle) !bool {
+fn cursorDown(buffer: *Buffer, table: *const PieceTable, window: Window) void {
+    const mapped_line: i32 = buffer.cursor.line - window.start_line;
+    const mapped_col: i32 = buffer.cursor.col - (window.start_col + buffer.properties.text_col);
+
+    const maybe_pos = table.clampPosition(mapped_line + 1, mapped_col);
+    const pos = maybe_pos orelse return;
+
+    buffer.cursor.line = pos.line + window.start_line;
+    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+
+    // if (is_out_of_screen) {
+    //     buffer.start_line += 1;
+    // }
+}
+
+fn cursorUp(buffer: *Buffer, table: *const PieceTable, window: Window) void {
+    const mapped_line: i32 = buffer.cursor.line - window.start_line;
+    const mapped_col: i32 = buffer.cursor.col - (window.start_col + buffer.properties.text_col);
+
+    const maybe_pos = table.clampPosition(mapped_line - 1, mapped_col);
+    const pos = maybe_pos orelse return;
+
+    buffer.cursor.line = pos.line + window.start_line;
+    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+}
+
+fn cursorLeft(buffer: *Buffer, table: *const PieceTable, window: Window) void {
+    const mapped_line: i32 = buffer.cursor.line - window.start_line;
+    const mapped_col: i32 = buffer.cursor.render_col - (window.start_col + buffer.properties.text_col);
+
+    const maybe_pos = table.clampPosition(mapped_line, mapped_col - 1);
+    const pos = maybe_pos orelse return;
+
+    buffer.cursor.line = pos.line + window.start_line;
+    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.col = buffer.cursor.render_col;
+}
+
+fn cursorRight(buffer: *Buffer, table: *const PieceTable, window: Window) void {
+    const mapped_line: i32 = buffer.cursor.line - window.start_line;
+    const mapped_col: i32 = buffer.cursor.render_col - (window.start_col + buffer.properties.text_col);
+
+    const maybe_pos = table.clampPosition(mapped_line, mapped_col + 1);
+    const pos = maybe_pos orelse return;
+
+    buffer.cursor.line = pos.line + window.start_line;
+    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.col = buffer.cursor.render_col;
+}
+
+fn processInput(screen: *Screen, resources: *const EditorResources, bh: ref.BufferHandle) !bool {
     const ev = try terminal.readInputEvent();
     if (ev == null) {
         return false;
@@ -61,39 +115,39 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
             return true;
         },
         .j, .down => {
-            buffer.cursorDown(table, screen.window);
+            cursorDown(buffer, table, screen.window);
         },
         .k, .up => {
-            buffer.cursorUp(table, screen.window);
+            cursorUp(buffer, table, screen.window);
         },
         .h, .left => {
-            buffer.cursorLeft(table, screen.window);
+            cursorLeft(buffer, table, screen.window);
         },
         .l, .right => {
-            buffer.cursorRight(table, screen.window);
+            cursorRight(buffer, table, screen.window);
         },
         .page_up => {
             var times = screen.window.line_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorUp(table, screen.window);
+                cursorUp(buffer, table, screen.window);
             }
         },
         .page_down => {
             var times = screen.window.line_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorDown(table, screen.window);
+                cursorDown(buffer, table, screen.window);
             }
         },
         .home => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorLeft(table, screen.window);
+                cursorLeft(buffer, table, screen.window);
             }
         },
         .end => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorRight(table, screen.window);
+                cursorRight(buffer, table, screen.window);
             }
         },
         .a => {
@@ -115,7 +169,7 @@ fn findCharInString(slice: []const u8, char: u8) ?usize {
     return null;
 }
 
-fn drawWindow(writer: anytype, window: Window, resources: *const EditorResources, bh: BufferHandle) !void {
+fn drawWindow(writer: anytype, window: Window, resources: *const EditorResources, bh: ref.BufferHandle) !void {
     try terminal.moveCursorToPosition(writer, .{ .line = window.start_line, .col = window.start_col });
 
     const buffer = resources.getBuffer(bh);
@@ -195,17 +249,7 @@ fn createPaddingString(allocator: Allocator, padding_len: i32) ![]const u8 {
     return string;
 }
 
-const BufferHandle = struct { val: u32 = 0 };
-const TableHandle = struct { val: u32 = 0 };
-
-const Cursor = struct {
-    line: i32,
-    col: i32,
-    render_col: i32,
-    table_offset: u32,
-};
-
-fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResources) !BufferHandle {
+fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResources) !ref.BufferHandle {
     const max_col_len = 17;
     const padding_len = @divFloor(screen.window.col_count - max_col_len, 2);
 
@@ -232,167 +276,6 @@ fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResourc
     return buffer_handle;
 }
 
-const BufferProperties = struct {
-    markers_col: i32,
-    line_number_col: i32,
-    text_col: i32,
-};
-
-const Buffer = struct {
-    allocator: Allocator,
-    th: TableHandle,
-    contents: []const u8,
-    read_only: bool,
-    cursor: Cursor,
-    start_line: i32,
-    properties: BufferProperties,
-
-    const Self = @This();
-
-    fn init(allocator: Allocator, th: TableHandle, resources: *const EditorResources) !Self {
-        var table = resources.getTable(th);
-        var contents = try table.toString(allocator, 0);
-
-        const text_col = 5;
-
-        return Self{
-            .allocator = allocator,
-            .th = th,
-            .contents = contents,
-            .read_only = false,
-            .start_line = 0,
-            .properties = BufferProperties{
-                .markers_col = 0,
-                .line_number_col = 1,
-                .text_col = text_col,
-            },
-            .cursor = .{
-                .line = 0,
-                .col = text_col,
-                .render_col = text_col,
-                .table_offset = 0,
-            },
-        };
-    }
-
-    fn updateContents(self: *Self, table: *PieceTable) !void {
-        self.allocator.free(self.contents);
-        self.contents = try table.toString(self.allocator, self.start_line);
-    }
-
-    fn deinit(self: *Self) void {
-        self.allocator.free(self.contents);
-    }
-
-    fn cursorDown(self: *Self, table: *const PieceTable, window: Window) void {
-        const mapped_line: i32 = self.cursor.line - window.start_line;
-        const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
-
-        const maybe_pos = table.clampPosition(mapped_line + 1, mapped_col);
-        const pos = maybe_pos orelse return;
-
-        self.cursor.line = pos.line + window.start_line;
-        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
-
-        // if (is_out_of_screen) {
-        //     self.start_line += 1;
-        // }
-    }
-
-    fn cursorUp(self: *Self, table: *const PieceTable, window: Window) void {
-        const mapped_line: i32 = self.cursor.line - window.start_line;
-        const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
-
-        const maybe_pos = table.clampPosition(mapped_line - 1, mapped_col);
-        const pos = maybe_pos orelse return;
-
-        self.cursor.line = pos.line + window.start_line;
-        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
-    }
-
-    fn cursorLeft(self: *Self, table: *const PieceTable, window: Window) void {
-        const mapped_line: i32 = self.cursor.line - window.start_line;
-        const mapped_col: i32 = self.cursor.render_col - (window.start_col + self.properties.text_col);
-
-        const maybe_pos = table.clampPosition(mapped_line, mapped_col - 1);
-        const pos = maybe_pos orelse return;
-
-        self.cursor.line = pos.line + window.start_line;
-        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
-        self.cursor.col = self.cursor.render_col;
-    }
-
-    fn cursorRight(self: *Self, table: *const PieceTable, window: Window) void {
-        const mapped_line: i32 = self.cursor.line - window.start_line;
-        const mapped_col: i32 = self.cursor.render_col - (window.start_col + self.properties.text_col);
-
-        const maybe_pos = table.clampPosition(mapped_line, mapped_col + 1);
-        const pos = maybe_pos orelse return;
-
-        self.cursor.line = pos.line + window.start_line;
-        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
-        self.cursor.col = self.cursor.render_col;
-    }
-};
-
-const EditorResources = struct {
-    allocator: Allocator,
-    buffers: std.ArrayListUnmanaged(Buffer),
-    tables: std.ArrayListUnmanaged(PieceTable),
-
-    const Self = @This();
-
-    fn init(allocator: Allocator) !Self {
-        const buffers = try std.ArrayListUnmanaged(Buffer).initCapacity(allocator, 10);
-        const tables = try std.ArrayListUnmanaged(PieceTable).initCapacity(allocator, 10);
-        return Self{
-            .allocator = allocator,
-            .buffers = buffers,
-            .tables = tables,
-        };
-    }
-
-    fn deinit(self: *Self) void {
-        for (self.buffers.items) |*buffer| {
-            buffer.deinit();
-        }
-        self.buffers.deinit(self.allocator);
-
-        for (self.tables.items) |*table| {
-            table.deinit();
-        }
-        self.tables.deinit(self.allocator);
-    }
-
-    fn createTableFromFile(self: *Self, file: std.fs.File) !TableHandle {
-        var pt = try PieceTable.initFromFile(self.allocator, file);
-        try self.tables.append(self.allocator, pt);
-        return TableHandle{ .val = @intCast(u32, self.tables.items.len) - 1 };
-    }
-
-    fn createTableFromString(self: *Self, string: []const u8) !TableHandle {
-        var pt = try PieceTable.initFromString(self.allocator, string);
-        try self.tables.append(self.allocator, pt);
-        return TableHandle{
-            .val = @intCast(u32, self.tables.items.len) - 1,
-        };
-    }
-
-    fn createBuffer(self: *Self, table_handle: TableHandle) !BufferHandle {
-        const buffer = try Buffer.init(self.allocator, table_handle, self);
-        try self.buffers.append(self.allocator, buffer);
-        return BufferHandle{ .val = @intCast(u32, self.buffers.items.len) - 1 };
-    }
-
-    fn getTable(self: *const Self, th: TableHandle) *PieceTable {
-        return &self.tables.items[th.val];
-    }
-
-    fn getBuffer(self: *const Self, bh: BufferHandle) *Buffer {
-        return &self.buffers.items[bh.val];
-    }
-};
-
 fn run(allocator: Allocator, args: Args) anyerror!void {
     var cwd = std.fs.cwd();
 
@@ -405,7 +288,7 @@ fn run(allocator: Allocator, args: Args) anyerror!void {
     var screen = try Screen.init(frame.writer());
     defer screen.deinit() catch {};
 
-    var bh: BufferHandle = undefined;
+    var bh: ref.BufferHandle = undefined;
     if (args.file_path != null) {
         var file = try cwd.openFile(args.file_path.?, .{ .read = true });
         var table_handle = try resources.createTableFromFile(file);
