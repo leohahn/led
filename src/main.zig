@@ -87,60 +87,133 @@ fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
     buffer.cursor.col = buffer.cursor.render_col;
 }
 
-fn processInput(screen: *Screen, resources: *const EditorResources, bh: ref.BufferHandle) !bool {
-    const ev = try terminal.readInputEvent();
-    if (ev == null) {
-        return false;
-    }
+const VimMode = enum {
+    normal,
+    insert,
+};
 
+const Command = union(enum) {
+    cursor_down,
+    cursor_up,
+    cursor_left,
+    cursor_right,
+    quit,
+    half_screen_up,
+    half_screen_down,
+    goto_end_of_line,
+    goto_start_of_line,
+    insert: []const u8,
+    noop,
+};
+
+const VimEmulator = struct {
+    mode: VimMode,
+
+    const Self = @This();
+
+    fn processKey(self: *Self, key: terminal.Key) Command {
+        _ = self;
+        // switch (self.mode) {
+        //     .normal => {},
+        //     .insert => {},
+        // }
+
+        switch (key) {
+            .q => {
+                return .quit;
+            },
+            .j, .down => {
+                return .cursor_down;
+            },
+            .k, .up => {
+                return .cursor_up;
+            },
+            .h, .left => {
+                return .cursor_left;
+            },
+            .l, .right => {
+                return .cursor_right;
+            },
+            .page_up => {
+                return .half_screen_up;
+            },
+            .page_down => {
+                return .half_screen_down;
+            },
+            .home => {
+                return .goto_start_of_line;
+            },
+            .end => {
+                return .goto_end_of_line;
+            },
+            .a => {
+                return Command{
+                    .insert = "a",
+                };
+            },
+            else => {
+                return .noop;
+            },
+        }
+    }
+};
+
+fn processCommand(
+    screen: *Screen,
+    command: Command,
+    resources: *const EditorResources,
+    bh: ref.BufferHandle,
+) !bool {
     var buffer = resources.getBuffer(bh);
     var table = resources.getTable(buffer.th);
 
-    switch (ev.?) {
-        .q => {
-            return true;
-        },
-        .j, .down => {
+    switch (command) {
+        .cursor_down => {
             cursorDown(buffer, table);
         },
-        .k, .up => {
+        .cursor_up => {
             cursorUp(buffer, table);
         },
-        .h, .left => {
+        .cursor_left => {
             cursorLeft(buffer, table);
         },
-        .l, .right => {
+        .cursor_right => {
             cursorRight(buffer, table);
         },
-        .page_up => {
+        .quit => {
+            return true;
+        },
+        .half_screen_up => {
             var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
                 cursorUp(buffer, table);
             }
         },
-        .page_down => {
+        .half_screen_down => {
             var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
                 cursorDown(buffer, table);
             }
         },
-        .home => {
-            var times = screen.window.boundary.col_count;
-            while (times > 0) : (times -= 1) {
-                cursorLeft(buffer, table);
-            }
-        },
-        .end => {
+        .goto_end_of_line => {
             var times = screen.window.boundary.col_count;
             while (times > 0) : (times -= 1) {
                 cursorRight(buffer, table);
             }
         },
-        .a => {
-            try table.insert(buffer.cursor.table_offset, "a");
+        .goto_start_of_line => {
+            var times = screen.window.boundary.col_count;
+            while (times > 0) : (times -= 1) {
+                cursorLeft(buffer, table);
+            }
+        },
+        .insert => |str| {
+            try table.insert(buffer.cursor.table_offset, str);
             try buffer.updateContents(table);
         },
-        else => {},
+        .noop => {
+            // do nothing.
+        },
     }
 
     return false;
@@ -337,6 +410,10 @@ fn run(allocator: Allocator, args: Args) anyerror!void {
         bh = try welcomeBuffer(allocator, screen, &resources);
     }
 
+    var emulator = VimEmulator{
+        .mode = VimMode.normal,
+    };
+
     while (true) {
         try terminal.hideCursor(frame.writer());
         try terminal.refreshScreen(frame.writer());
@@ -347,7 +424,16 @@ fn run(allocator: Allocator, args: Args) anyerror!void {
         _ = try stdout.write(frame.items);
         frame.clearRetainingCapacity();
 
-        if (try processInput(&screen, &resources, bh)) {
+        const maybe_key = try terminal.readInputEvent();
+        const key = maybe_key orelse {
+            continue;
+        };
+
+        const command = emulator.processKey(key);
+
+        const shouldQuit = try processCommand(&screen, command, &resources, bh);
+
+        if (shouldQuit) {
             break;
         }
     }
