@@ -36,4 +36,12 @@ pub const Window = struct {
     line_count: i32,
     col_count: i32,
     properties: Properties,
+
+    const Self = @This();
+
+    pub fn lastTerminalLine(self: *const Self) terminal.Line {
+        return .{
+            .val = self.start_line.val + self.line_count - 1,
+        };
+    }
 };

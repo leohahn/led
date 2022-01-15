@@ -11,6 +11,10 @@ pub const Line = struct {
     pub fn toWindowLine(self: Self, offset: window.Line) window.Line {
         return .{ .val = self.val + offset.val };
     }
+
+    pub fn sub(self: Self, other: Self) Self {
+        return .{ .val = self.val - other.val };
+    }
 };
 
 pub const Col = struct { 
@@ -57,9 +61,14 @@ pub const Buffer = struct {
         };
     }
 
-    pub fn updateContents(self: *Self, table: *PieceTable) !void {
+    pub fn updateContents(self: *Self, table: *const PieceTable) !void {
         self.allocator.free(self.contents);
         self.contents = try table.toString(self.allocator, self.start_line);
+    }
+
+    pub fn scrollLines(self: *Self, lines: i32, table: *const PieceTable) !void {
+        self.start_line += lines; 
+        try self.updateContents(table);
     }
 
     pub fn deinit(self: *Self) void {

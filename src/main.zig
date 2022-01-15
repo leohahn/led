@@ -31,8 +31,8 @@ const Screen = struct {
             .raw_mode = raw_mode,
             .window = Window{
                 .start_col = .{ .val = 0 },
-                .start_line = .{ .val = 10 },
-                .line_count = size.lines - 10,
+                .start_line = .{ .val = 0 },
+                .line_count = size.lines,
                 .col_count = size.cols,
                 .properties = window.Properties{
                     .markers_col = .{ .val = 0 },
@@ -56,10 +56,6 @@ fn cursorDown(buffer: *Buffer, table: *const PieceTable) void {
 
     buffer.cursor.line = .{ .val = pos.line };
     buffer.cursor.render_col = .{ .val = pos.col };
-
-    // if (is_out_of_screen) {
-    //     buffer.start_line += 1;
-    // }
 }
 
 fn cursorUp(buffer: *Buffer, table: *const PieceTable) void {
@@ -162,15 +158,43 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
         .col = win.start_col,
     });
 
-    const buffer = resources.getBuffer(bh);
+    var buffer = resources.getBuffer(bh);
     assert(findCharInString(buffer.contents, '\r') == null);
+
+    const table = resources.getTable(buffer.th);
+
+    const last_terminal_line = win.lastTerminalLine();
+
+    // The numbers of line that we need to skip in order to be able to see the cursor on the screen.
+    const lines_to_skip: i32 = blk: {
+        const cursor_line = buffer.cursor.line
+            .toWindowLine(win.properties.buffer_line);
+
+        const cursor_window_line = cursor_line.val - buffer.start_line;
+
+        if (cursor_window_line > last_terminal_line.val) {
+            break :blk cursor_window_line - last_terminal_line.val;
+        }
+
+        if (cursor_window_line < 0) {
+            break :blk cursor_window_line;
+        }
+
+        break :blk 0;
+    };
+
+    if (lines_to_skip != 0) {
+        try buffer.scrollLines(lines_to_skip, table);
+    }
 
     var line: terminal.Line = win.start_line;
     var remaining_string = buffer.contents;
+    var display_line = buffer.start_line + 1;
 
-    const last_line: terminal.Line = .{ .val = win.start_line.val + win.line_count };
-
-    while (line.val < last_line.val) : (line = .{ .val = line.val + 1 }) {
+    while (line.val <= last_terminal_line.val) : ({
+        line = .{ .val = line.val + 1 };
+        display_line += 1;
+    }) {
         if (remaining_string.len == 0) {
             try terminal.moveCursorToPosition(writer, .{
                 .line = line,
@@ -186,7 +210,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
                 .line = line,
                 .col = win.properties.line_number_col.toTerminalCol(win.start_col),
             });
-            _ = try writer.print("{d: <5}", .{@intCast(u32, line.val + 1)});
+            _ = try writer.print("{d: <5}", .{@intCast(u32, display_line)});
         }
 
         try terminal.moveCursorToPosition(writer, .{ 
@@ -207,6 +231,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
 
     try terminal.moveCursorToPosition(writer, .{
         .line = buffer.cursor.line
+            .sub(.{ .val = buffer.start_line })
             .toWindowLine(win.properties.buffer_line)
             .toTerminalLine(win.start_line),
         .col = buffer.cursor.render_col
@@ -322,9 +347,12 @@ pub fn main() anyerror!void {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{
         // NOTE(lhahn): debug values.
+        .safety = true,
         .retain_metadata = true,
         .never_unmap = true,
     }){};
+    defer _ = gpa.deinit();
+
     var allocator = gpa.allocator();
 
     var args = try Args.init(allocator);
