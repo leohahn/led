@@ -67,10 +67,10 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
             buffer.cursorUp(table, screen.window);
         },
         .h, .left => {
-            buffer.cursorLeft(table);
+            buffer.cursorLeft(table, screen.window);
         },
         .l, .right => {
-            buffer.cursorRight(table);
+            buffer.cursorRight(table, screen.window);
         },
         .page_up => {
             var times = screen.window.line_count;
@@ -87,13 +87,13 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: BufferHa
         .home => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorLeft(table);
+                buffer.cursorLeft(table, screen.window);
             }
         },
         .end => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                buffer.cursorRight(table);
+                buffer.cursorRight(table, screen.window);
             }
         },
         .a => {
@@ -244,13 +244,14 @@ const Buffer = struct {
     contents: []const u8,
     read_only: bool,
     cursor: Cursor,
+    start_line: i32,
     properties: BufferProperties,
 
     const Self = @This();
 
     fn init(allocator: Allocator, th: TableHandle, resources: *const EditorResources) !Self {
         var table = resources.getTable(th);
-        var contents = try table.toString(allocator);
+        var contents = try table.toString(allocator, 0);
 
         const text_col = 5;
 
@@ -259,6 +260,7 @@ const Buffer = struct {
             .th = th,
             .contents = contents,
             .read_only = false,
+            .start_line = 0,
             .properties = BufferProperties{
                 .markers_col = 0,
                 .line_number_col = 1,
@@ -275,7 +277,7 @@ const Buffer = struct {
 
     fn updateContents(self: *Self, table: *PieceTable) !void {
         self.allocator.free(self.contents);
-        self.contents = try table.toString(self.allocator);
+        self.contents = try table.toString(self.allocator, self.start_line);
     }
 
     fn deinit(self: *Self) void {
@@ -286,56 +288,50 @@ const Buffer = struct {
         const mapped_line: i32 = self.cursor.line - window.start_line;
         const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
-        const maybe_pos = table.lineAt(mapped_line + 1, mapped_col);
+        const maybe_pos = table.clampPosition(mapped_line + 1, mapped_col);
         const pos = maybe_pos orelse return;
 
         self.cursor.line = pos.line + window.start_line;
         self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
+
+        // if (is_out_of_screen) {
+        //     self.start_line += 1;
+        // }
     }
 
     fn cursorUp(self: *Self, table: *const PieceTable, window: Window) void {
         const mapped_line: i32 = self.cursor.line - window.start_line;
         const mapped_col: i32 = self.cursor.col - (window.start_col + self.properties.text_col);
 
-        const maybe_pos = table.lineAt(mapped_line - 1, mapped_col);
+        const maybe_pos = table.clampPosition(mapped_line - 1, mapped_col);
         const pos = maybe_pos orelse return;
 
         self.cursor.line = pos.line + window.start_line;
         self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
     }
 
-    fn cursorLeft(self: *Self, table: *const PieceTable) void {
-        if (self.cursor.table_offset == 0) {
-            return;
-        }
+    fn cursorLeft(self: *Self, table: *const PieceTable, window: Window) void {
+        const mapped_line: i32 = self.cursor.line - window.start_line;
+        const mapped_col: i32 = self.cursor.render_col - (window.start_col + self.properties.text_col);
 
-        const item = table.itemAt(self.cursor.table_offset - 1);
-        if (item == null) {
-            return;
-        }
+        const maybe_pos = table.clampPosition(mapped_line, mapped_col - 1);
+        const pos = maybe_pos orelse return;
 
-        if (item.? == @as(u21, '\n')) {
-            return;
-        }
-
-        self.cursor.table_offset -= 1;
-        self.cursor.col -= 1;
-        self.cursor.render_col = self.cursor.col;
+        self.cursor.line = pos.line + window.start_line;
+        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
+        self.cursor.col = self.cursor.render_col;
     }
 
-    fn cursorRight(self: *Self, table: *const PieceTable) void {
-        const item = table.itemAt(self.cursor.table_offset + 1);
-        if (item == null) {
-            return;
-        }
+    fn cursorRight(self: *Self, table: *const PieceTable, window: Window) void {
+        const mapped_line: i32 = self.cursor.line - window.start_line;
+        const mapped_col: i32 = self.cursor.render_col - (window.start_col + self.properties.text_col);
 
-        if (item.? == @as(u21, '\n')) {
-            return;
-        }
+        const maybe_pos = table.clampPosition(mapped_line, mapped_col + 1);
+        const pos = maybe_pos orelse return;
 
-        self.cursor.table_offset += 1;
-        self.cursor.col += 1;
-        self.cursor.render_col = self.cursor.col;
+        self.cursor.line = pos.line + window.start_line;
+        self.cursor.render_col = pos.col + window.start_col + self.properties.text_col;
+        self.cursor.col = self.cursor.render_col;
     }
 };
 

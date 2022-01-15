@@ -112,6 +112,35 @@ fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
     return current_col;
 }
 
+fn findLineInString(s: []const u8, line: i32) ?u32 {
+    var current_line: i32 = 0;
+    var current_line_offset: u32 = 0;
+    var current_str = s;
+
+    while (current_line < line) {
+        const maybe_offset = std.mem.indexOfPos(u8, current_str, current_line_offset, "\n");
+        
+        if (maybe_offset == null) {
+            break;
+        }
+
+        const offset = maybe_offset.? + 1;
+
+        if (offset >= current_str.len) {
+            return null;
+        }
+        
+        current_line += 1;
+        current_line_offset = @intCast(u32, offset);
+    }
+
+    if (current_line != line) {
+        return null;
+    }
+
+    return current_line_offset;
+}
+
 pub const PieceTable = struct {
     const Self = @This();
 
@@ -171,12 +200,70 @@ pub const PieceTable = struct {
         return length;
     }
 
-    pub fn toString(self: *const Self, allocator: Allocator) ![]const u8 {
-        var str_buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 20);
+    // Given the desired line, finds the correct piece index. Returns null if it does not exist.
+    fn findPieceWithLine(self: *const Self, line: i32) ?PiecePosition {
+        assert(line >= 0);
 
-        for (self.pieces.items) |piece| {
-            const piece_buffer = piece.getBuffer(self.buffers);
-            try str_buf.appendSlice(allocator, piece_buffer);
+        var maybe_piece_index: ?u32 = null;
+        var accumulated_line: i32 = 0;
+
+        for (self.pieces.items) |piece, index| {
+            const new_accumulated_line: i32 = accumulated_line + piece.line_count;
+            if (new_accumulated_line < line) {
+                accumulated_line = new_accumulated_line;
+                continue;
+            }
+
+            maybe_piece_index = @intCast(u32, index); 
+            break;
+        }
+
+        const piece_index = maybe_piece_index orelse return null;
+        const piece_buffer = self.pieces.items[piece_index].getBuffer(self.buffers);
+
+        const piece_offset = findLineInString(piece_buffer, line - accumulated_line);
+
+        if (piece_offset == null) {
+            if (piece_index + 1 >= self.pieces.items.len) {
+                return null;
+            }
+
+            return PiecePosition{
+                .inside_piece = .{
+                    .index = piece_index + 1,
+                    .offset = 0,
+                },
+            };
+        }
+
+        return PiecePosition{
+            .inside_piece = .{
+                .index = piece_index,
+                .offset = piece_offset.?,
+            },
+        };
+    }
+
+    pub fn toString(self: *const Self, allocator: Allocator, start_line: i32) ![]const u8 {
+        var str_buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 20);
+        const maybe_piece_position = self.findPieceWithLine(start_line);
+        const piece_position = maybe_piece_position orelse return str_buf.toOwnedSlice(allocator);
+
+        switch (piece_position) {
+            .end_of_buffer => {
+                // do nothing
+            },
+            .inside_piece => |inside_piece| {
+                for (self.pieces.items[inside_piece.index..]) |piece, i| {
+                    const piece_buffer = piece.getBuffer(self.buffers);
+                    if (i == 0) {
+                        try str_buf.appendSlice(allocator, piece_buffer[inside_piece.offset..]);
+                    } else {
+                        try str_buf.appendSlice(allocator, piece_buffer);
+                    }
+
+                }
+            },
         }
 
         return str_buf.toOwnedSlice(allocator);
@@ -244,20 +331,20 @@ pub const PieceTable = struct {
         }
     }
 
-    pub fn lineAt(self: *const Self, desired_line: i32, col: i32) ?Position {
-        if (desired_line < 0) {
+    pub fn clampPosition(self: *const Self, desired_line: i32, desired_col: i32) ?Position {
+        if (desired_line < 0 or desired_col < 0) {
             return null;
         }
 
-        assert(col >= 0);
+        assert(desired_col >= 0);
 
-        var maybe_piece_index: ?usize = null;
+        var maybe_piece_index: ?u32 = null;
         var accumulated_line: i32 = 0;
 
         for (self.pieces.items) |piece, index| {
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
             if (new_accumulated_line > desired_line) {
-                maybe_piece_index = index; 
+                maybe_piece_index = @intCast(u32, index); 
                 break;
             }
             accumulated_line = new_accumulated_line;
@@ -266,7 +353,7 @@ pub const PieceTable = struct {
         const piece_index = maybe_piece_index orelse return null;
         const piece_buffer = self.pieces.items[piece_index].getBuffer(self.buffers);
 
-        const new_col = clampColumnInLine(piece_buffer, desired_line - accumulated_line, col);
+        const new_col = clampColumnInLine(piece_buffer, desired_line - accumulated_line, desired_col);
 
         return Position{
             .line = desired_line,
@@ -344,6 +431,10 @@ fn utf8At(slice: []const u8, offset: u32) ?u21 {
     return codepoint;
 }
 
+//=======================================================================
+// Tests
+//=======================================================================
+
 fn readFileToString(allocator: Allocator, file: std.fs.File) ![]const u8 {
     const max_bytes = 100 * 1024 * 1024; // 100 MBs
     const pos = try file.getPos();
@@ -354,7 +445,7 @@ fn readFileToString(allocator: Allocator, file: std.fs.File) ![]const u8 {
 }
 
 fn assertPieceTableContents(pt: *const PieceTable, expected: []const u8) !void {
-    const got = try pt.toString(std.testing.allocator);
+    const got = try pt.toString(std.testing.allocator, 0);
     defer std.testing.allocator.free(got);
     try std.testing.expectEqualStrings(expected, got);
 }
@@ -448,7 +539,7 @@ test "can create a piece table and use itemAt" {
     const file_str = try readFileToString(std.testing.allocator, file);
     defer std.testing.allocator.free(file_str);
 
-    const got_file_str = try pt.toString(std.testing.allocator);
+    const got_file_str = try pt.toString(std.testing.allocator, 0);
     defer std.testing.allocator.free(got_file_str);
 
     try std.testing.expectEqualStrings(got_file_str, file_str);
@@ -486,7 +577,7 @@ test "clampColumnInLine" {
     try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 11));
 }
 
-test "lineAt" {
+test "clampPosition" {
     const expectEqual = std.testing.expectEqual;
 
     const str = 
@@ -500,20 +591,59 @@ test "lineAt" {
     defer pt.deinit();
 
     {
-        const pos = pt.lineAt(-1, 0);
+        const pos = pt.clampPosition(-1, 0);
         try expectEqual(pos, null);
     } 
     {
-        const pos = pt.lineAt(0, 0) orelse unreachable;
+        const pos = pt.clampPosition(0, 0) orelse unreachable;
         try expectEqual(pos, .{ .line = 0, .col = 0 });
     }
     {
-        const pos = pt.lineAt(1, 0) orelse unreachable;
+        const pos = pt.clampPosition(1, 0) orelse unreachable;
         try expectEqual(pos, .{ .line = 1, .col = 0 });
     }
     {
-        const pos = pt.lineAt(2, 4) orelse unreachable;
+        const pos = pt.clampPosition(2, 4) orelse unreachable;
         try expectEqual(pos, .{ .line = 2, .col = 0 });
     }
 }
 
+test "toString" {
+    const expectEqualStrings = std.testing.expectEqualStrings;
+    const allocator = std.testing.allocator;
+
+    var cwd = std.fs.cwd();
+    var file = try cwd.openFile("fixtures/main.zig", .{ .read = true });
+    defer file.close();
+
+    const str = "random\nstring buffer.\naaaa\n\n";
+
+    var pt = try PieceTable.initFromString(allocator, str);
+    defer pt.deinit();
+
+    {
+        const s = try pt.toString(allocator, 0);
+        defer allocator.free(s);
+        try expectEqualStrings("random\nstring buffer.\naaaa\n\n", s);
+    }
+    {
+        const s = try pt.toString(allocator, 1);
+        defer allocator.free(s);
+        try expectEqualStrings("string buffer.\naaaa\n\n", s);
+    }
+    {
+        const s = try pt.toString(allocator, 2);
+        defer allocator.free(s);
+        try expectEqualStrings("aaaa\n\n", s);
+    }
+    {
+        const s = try pt.toString(allocator, 3);
+        defer allocator.free(s);
+        try expectEqualStrings("\n", s);
+    }
+    {
+        const s = try pt.toString(allocator, 4);
+        defer if (s.len > 0) allocator.free(s);
+        try expectEqualStrings("", s);
+    }
+}
