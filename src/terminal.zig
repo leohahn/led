@@ -205,14 +205,14 @@ const WindowSize = struct {
 };
 
 pub const Position = struct {
-    line: i32,
-    col: i32,
+    line: Line,
+    col: Col,
 
     const Self = @This();
     pub fn start() Self {
         return .{
-            .line = 0,
-            .col = 0,
+            .line = .{ .val = 0 },
+            .col = .{ .val = 0 }, 
         };
     }
 };
@@ -271,8 +271,8 @@ pub fn getCursorPosition() !Position {
     const col = try readIntUntil(i32, Key.R);
 
     return Position{
-        .line = line - 1,
-        .col = col - 1,
+        .line = .{ .val = line - 1 },
+        .col = .{ .val = col - 1 },
     };
 }
 
@@ -285,8 +285,8 @@ pub fn getWindowSize() !WindowSize {
         _ = try stdout.write("\x1b[999C\x1b[999B");
         const cursor_pos = try getCursorPosition();
         return WindowSize{
-            .lines = cursor_pos.line,
-            .cols = cursor_pos.col,
+            .lines = cursor_pos.line.val + 1,
+            .cols = cursor_pos.col.val + 1,
         };
     }
 
@@ -304,10 +304,13 @@ pub fn showCursor(writer: anytype) !void {
     _ = try writer.write("\x1b[?25h");
 }
 
+pub const Line = struct { val: i32 };
+pub const Col = struct { val: i32 };
+
 pub fn moveCursorToPosition(writer: anytype, position: Position) !void {
     try writer.print(
         "\x1b[{d};{d}H",
-        .{ position.line + 1, position.col + 1 },
+        .{ position.line.val + 1, position.col.val + 1 },
     );
 }
 

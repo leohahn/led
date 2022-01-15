@@ -119,7 +119,7 @@ fn findLineInString(s: []const u8, line: i32) ?u32 {
 
     while (current_line < line) {
         const maybe_offset = std.mem.indexOfPos(u8, current_str, current_line_offset, "\n");
-        
+
         if (maybe_offset == null) {
             break;
         }
@@ -129,7 +129,7 @@ fn findLineInString(s: []const u8, line: i32) ?u32 {
         if (offset >= current_str.len) {
             return null;
         }
-        
+
         current_line += 1;
         current_line_offset = @intCast(u32, offset);
     }
@@ -214,7 +214,7 @@ pub const PieceTable = struct {
                 continue;
             }
 
-            maybe_piece_index = @intCast(u32, index); 
+            maybe_piece_index = @intCast(u32, index);
             break;
         }
 
@@ -261,7 +261,6 @@ pub const PieceTable = struct {
                     } else {
                         try str_buf.appendSlice(allocator, piece_buffer);
                     }
-
                 }
             },
         }
@@ -344,7 +343,7 @@ pub const PieceTable = struct {
         for (self.pieces.items) |piece, index| {
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
             if (new_accumulated_line > desired_line) {
-                maybe_piece_index = @intCast(u32, index); 
+                maybe_piece_index = @intCast(u32, index);
                 break;
             }
             accumulated_line = new_accumulated_line;
@@ -557,7 +556,7 @@ test "utf8At" {
 test "clampColumnInLine" {
     const expectEqual = std.testing.expectEqual;
 
-    const text = 
+    const text =
         \\
         \\the big dog
         \\jumped over the lazy
@@ -580,7 +579,7 @@ test "clampColumnInLine" {
 test "clampPosition" {
     const expectEqual = std.testing.expectEqual;
 
-    const str = 
+    const str =
         \\the cat jumps over the lazy dog.
         \\I am going to disneyland.
         \\
@@ -593,7 +592,7 @@ test "clampPosition" {
     {
         const pos = pt.clampPosition(-1, 0);
         try expectEqual(pos, null);
-    } 
+    }
     {
         const pos = pt.clampPosition(0, 0) orelse unreachable;
         try expectEqual(pos, .{ .line = 0, .col = 0 });

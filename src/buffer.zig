@@ -2,17 +2,30 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ref = @import("./ref.zig");
 const PieceTable = @import("./piece_table.zig").PieceTable;
+const window = @import("./window.zig");
 
-pub const BufferProperties = struct {
-    markers_col: i32,
-    line_number_col: i32,
-    text_col: i32,
+pub const Line = struct { 
+    val: i32,
+
+    const Self = @This();
+    pub fn toWindowLine(self: Self, offset: window.Line) window.Line {
+        return .{ .val = self.val + offset.val };
+    }
+};
+
+pub const Col = struct { 
+    val: i32,
+
+    const Self = @This();
+    pub fn toWindowCol(self: Self, offset: window.Col) window.Col {
+        return .{ .val = self.val + offset.val };
+    }
 };
 
 pub const Cursor = struct {
-    line: i32,
-    col: i32,
-    render_col: i32,
+    line: Line,
+    col: Col,
+    render_col: Col,
     table_offset: u32,
 };
 
@@ -23,14 +36,11 @@ pub const Buffer = struct {
     read_only: bool,
     cursor: Cursor,
     start_line: i32,
-    properties: BufferProperties,
 
     const Self = @This();
 
     pub fn init(allocator: Allocator, th: ref.TableHandle, table: *const PieceTable) !Self {
         var contents = try table.toString(allocator, 0);
-
-        const text_col = 5;
 
         return Self{
             .allocator = allocator,
@@ -38,15 +48,10 @@ pub const Buffer = struct {
             .contents = contents,
             .read_only = false,
             .start_line = 0,
-            .properties = BufferProperties{
-                .markers_col = 0,
-                .line_number_col = 1,
-                .text_col = text_col,
-            },
             .cursor = .{
-                .line = 0,
-                .col = text_col,
-                .render_col = text_col,
+                .line = .{ .val = 0 },
+                .col = .{ .val = 0 },
+                .render_col = .{ .val = 0 },
                 .table_offset = 0,
             },
         };
@@ -61,4 +66,3 @@ pub const Buffer = struct {
         self.allocator.free(self.contents);
     }
 };
-

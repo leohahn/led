@@ -1,5 +1,5 @@
 const std = @import("std");
-const piece_table = @import("./piece_table.zig");
+const PieceTable = @import("./piece_table.zig").PieceTable;
 const editor_resources = @import("./editor_resources.zig");
 const EditorResources = editor_resources.EditorResources;
 const terminal = @import("./terminal.zig");
@@ -7,21 +7,11 @@ const log = @import("./log.zig");
 const Buffer = @import("./buffer.zig").Buffer;
 const assert = std.debug.assert;
 const ref = @import("./ref.zig");
+const Allocator = std.mem.Allocator;
+const window = @import("./window.zig");
+const Window = window.Window;
 
 const VERSION = "0.1.0";
-
-const Allocator = std.mem.Allocator;
-const PieceTable = piece_table.PieceTable;
-
-const DisplayLine = struct { val: i32 };
-const DisplayCol = struct { val: i32 };
-
-const Window = struct {
-    start_col: i32,
-    start_line: i32,
-    line_count: i32,
-    col_count: i32,
-};
 
 const Screen = struct {
     window: Window,
@@ -34,13 +24,22 @@ const Screen = struct {
         try terminal.useAlternateScreenBuffer(writer);
         const size = try terminal.getWindowSize();
 
+        const buffer_line: window.Line = .{ .val = 0 };
+        const buffer_col: window.Col = .{ .val = 5 };
+
         return Self{
             .raw_mode = raw_mode,
             .window = Window{
-                .start_col = 0,
-                .start_line = 0,
-                .line_count = size.lines,
+                .start_col = .{ .val = 0 },
+                .start_line = .{ .val = 10 },
+                .line_count = size.lines - 10,
                 .col_count = size.cols,
+                .properties = window.Properties{
+                    .markers_col = .{ .val = 0 },
+                    .line_number_col = .{ .val = 1 },
+                    .buffer_col = buffer_col,
+                    .buffer_line = buffer_line,
+                },
             },
         };
     }
@@ -51,53 +50,41 @@ const Screen = struct {
     }
 };
 
-fn cursorDown(buffer: *Buffer, table: *const PieceTable, window: Window) void {
-    const mapped_line: i32 = buffer.cursor.line - window.start_line;
-    const mapped_col: i32 = buffer.cursor.col - (window.start_col + buffer.properties.text_col);
-
-    const maybe_pos = table.clampPosition(mapped_line + 1, mapped_col);
+fn cursorDown(buffer: *Buffer, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(buffer.cursor.line.val + 1, buffer.cursor.col.val);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = pos.line + window.start_line;
-    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.line = .{ .val = pos.line };
+    buffer.cursor.render_col = .{ .val = pos.col };
 
     // if (is_out_of_screen) {
     //     buffer.start_line += 1;
     // }
 }
 
-fn cursorUp(buffer: *Buffer, table: *const PieceTable, window: Window) void {
-    const mapped_line: i32 = buffer.cursor.line - window.start_line;
-    const mapped_col: i32 = buffer.cursor.col - (window.start_col + buffer.properties.text_col);
-
-    const maybe_pos = table.clampPosition(mapped_line - 1, mapped_col);
+fn cursorUp(buffer: *Buffer, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(buffer.cursor.line.val - 1, buffer.cursor.col.val);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = pos.line + window.start_line;
-    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.line = .{ .val = pos.line };
+    buffer.cursor.render_col = .{ .val = pos.col };
 }
 
-fn cursorLeft(buffer: *Buffer, table: *const PieceTable, window: Window) void {
-    const mapped_line: i32 = buffer.cursor.line - window.start_line;
-    const mapped_col: i32 = buffer.cursor.render_col - (window.start_col + buffer.properties.text_col);
-
-    const maybe_pos = table.clampPosition(mapped_line, mapped_col - 1);
+fn cursorLeft(buffer: *Buffer, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(buffer.cursor.line.val, buffer.cursor.col.val - 1);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = pos.line + window.start_line;
-    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.line = .{ .val = pos.line };
+    buffer.cursor.render_col = .{ .val = pos.col };
     buffer.cursor.col = buffer.cursor.render_col;
 }
 
-fn cursorRight(buffer: *Buffer, table: *const PieceTable, window: Window) void {
-    const mapped_line: i32 = buffer.cursor.line - window.start_line;
-    const mapped_col: i32 = buffer.cursor.render_col - (window.start_col + buffer.properties.text_col);
-
-    const maybe_pos = table.clampPosition(mapped_line, mapped_col + 1);
+fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(buffer.cursor.line.val, buffer.cursor.col.val + 1);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = pos.line + window.start_line;
-    buffer.cursor.render_col = pos.col + window.start_col + buffer.properties.text_col;
+    buffer.cursor.line = .{ .val = pos.line };
+    buffer.cursor.render_col = . { .val = pos.col };
     buffer.cursor.col = buffer.cursor.render_col;
 }
 
@@ -115,39 +102,39 @@ fn processInput(screen: *Screen, resources: *const EditorResources, bh: ref.Buff
             return true;
         },
         .j, .down => {
-            cursorDown(buffer, table, screen.window);
+            cursorDown(buffer, table);
         },
         .k, .up => {
-            cursorUp(buffer, table, screen.window);
+            cursorUp(buffer, table);
         },
         .h, .left => {
-            cursorLeft(buffer, table, screen.window);
+            cursorLeft(buffer, table);
         },
         .l, .right => {
-            cursorRight(buffer, table, screen.window);
+            cursorRight(buffer, table);
         },
         .page_up => {
             var times = screen.window.line_count;
             while (times > 0) : (times -= 1) {
-                cursorUp(buffer, table, screen.window);
+                cursorUp(buffer, table);
             }
         },
         .page_down => {
             var times = screen.window.line_count;
             while (times > 0) : (times -= 1) {
-                cursorDown(buffer, table, screen.window);
+                cursorDown(buffer, table);
             }
         },
         .home => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                cursorLeft(buffer, table, screen.window);
+                cursorLeft(buffer, table);
             }
         },
         .end => {
             var times = screen.window.col_count;
             while (times > 0) : (times -= 1) {
-                cursorRight(buffer, table, screen.window);
+                cursorRight(buffer, table);
             }
         },
         .a => {
@@ -169,31 +156,43 @@ fn findCharInString(slice: []const u8, char: u8) ?usize {
     return null;
 }
 
-fn drawWindow(writer: anytype, window: Window, resources: *const EditorResources, bh: ref.BufferHandle) !void {
-    try terminal.moveCursorToPosition(writer, .{ .line = window.start_line, .col = window.start_col });
+fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, bh: ref.BufferHandle) !void {
+    try terminal.moveCursorToPosition(writer, .{ 
+        .line = win.start_line, 
+        .col = win.start_col,
+    });
 
     const buffer = resources.getBuffer(bh);
     assert(findCharInString(buffer.contents, '\r') == null);
 
-    var line: i32 = window.start_line;
+    var line: terminal.Line = win.start_line;
     var remaining_string = buffer.contents;
 
-    while (line < window.start_line + window.line_count) : (line += 1) {
+    const last_line: terminal.Line = .{ .val = win.start_line.val + win.line_count };
+
+    while (line.val < last_line.val) : (line = .{ .val = line.val + 1 }) {
         if (remaining_string.len == 0) {
-            try terminal.moveCursorToPosition(writer, .{ .line = line, .col = buffer.properties.markers_col });
+            try terminal.moveCursorToPosition(writer, .{
+                .line = line,
+                .col = win.properties.markers_col.toTerminalCol(win.start_col),
+            });
             _ = try writer.write("~");
             continue;
         }
 
         {
             // Draw the line numbers
-            try terminal.moveCursorToPosition(writer, .{ 
-                .line = line, .col = buffer.properties.line_number_col,
+            try terminal.moveCursorToPosition(writer, .{
+                .line = line,
+                .col = win.properties.line_number_col.toTerminalCol(win.start_col),
             });
-            _ = try writer.print("{d: <5}", .{@intCast(u32, line + 1)});
+            _ = try writer.print("{d: <5}", .{@intCast(u32, line.val + 1)});
         }
 
-        try terminal.moveCursorToPosition(writer, .{ .line = line, .col = buffer.properties.text_col });
+        try terminal.moveCursorToPosition(writer, .{ 
+            .line = line, 
+            .col = win.properties.buffer_col.toTerminalCol(win.start_col),
+        });
 
         const index = findCharInString(remaining_string, '\n') orelse {
             _ = try writer.write(remaining_string);
@@ -207,8 +206,12 @@ fn drawWindow(writer: anytype, window: Window, resources: *const EditorResources
     }
 
     try terminal.moveCursorToPosition(writer, .{
-        .line = buffer.cursor.line,
-        .col = buffer.cursor.render_col,
+        .line = buffer.cursor.line
+            .toWindowLine(win.properties.buffer_line)
+            .toTerminalLine(win.start_line),
+        .col = buffer.cursor.render_col
+            .toWindowCol(win.properties.buffer_col)
+            .toTerminalCol(win.start_col),
     });
 }
 

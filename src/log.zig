@@ -4,7 +4,7 @@ var g_file: std.fs.File = undefined;
 
 pub fn init() !void {
     const cwd = std.fs.cwd();
-    g_file = try cwd.createFile("LOG.txt", .{.truncate = true});
+    g_file = try cwd.createFile("LOG.txt", .{ .truncate = true });
 }
 
 pub fn deinit() void {
