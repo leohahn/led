@@ -66,50 +66,56 @@ fn countLinesInString(str: []const u8) i32 {
     return count;
 }
 
-fn clampColumnInLine(string: []const u8, line: i32, col: i32) i32 {
+const ColumnCount = union(enum) {
+    count: i32,
+    unfinished_count: i32,
+};
+
+fn countColumnsInLine(string: []const u8, line: i32) !ColumnCount {
     var current_line: i32 = 0;
-    var current_col: i32 = 0;
+    var column_count: i32 = 0;
 
     var it = std.unicode.Utf8Iterator{
         .i = 0,
         .bytes = string,
     };
 
-    while (true) {
-        const codepoint_slice = it.peek(1);
-        if (codepoint_slice.len == 0) {
-            break;
-        }
-        const current_codepoint = std.unicode.utf8Decode(codepoint_slice) catch unreachable;
+    var line_ended = false;
 
+    while (it.nextCodepoint()) |codepoint| {
         if (current_line < line) {
-            if (current_codepoint == @as(u21, '\n')) {
+            if (codepoint == @as(u21, '\n')) {
                 current_line += 1;
-                current_col = 0;
+                column_count = 0;
             } else {
-                current_col += 1;
+                column_count += 1;
             }
-            _ = it.nextCodepoint() orelse break;
             continue;
         }
 
-        if (current_codepoint == @as(u21, '\n')) {
-            if (current_col > 1) {
-                current_col -= 1;
-            }
+        assert(current_line == line);
+
+        if (codepoint == @as(u21, '\n')) {
+            line_ended = true;
             break;
         }
 
-        if (current_col == col) {
-            break;
-        }
-
-        current_col += 1;
-        _ = it.nextCodepoint() orelse break;
+        column_count += 1;
     }
 
-    assert(current_line == line);
-    return current_col;
+    if (current_line < line) {
+        return error.InvalidLine;
+    }
+
+    if (line_ended) {
+        return ColumnCount{
+            .count = column_count,
+        };
+    }
+
+    return ColumnCount{
+        .unfinished_count = column_count,
+    };
 }
 
 fn findLineInString(s: []const u8, line: i32) ?u32 {
@@ -342,7 +348,7 @@ pub const PieceTable = struct {
 
         for (self.pieces.items) |piece, index| {
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
-            if (new_accumulated_line > desired_line) {
+            if (new_accumulated_line >= desired_line) {
                 maybe_piece_index = @intCast(u32, index);
                 break;
             }
@@ -350,13 +356,50 @@ pub const PieceTable = struct {
         }
 
         const piece_index = maybe_piece_index orelse return null;
-        const piece_buffer = self.pieces.items[piece_index].getBuffer(self.buffers);
 
-        const new_col = clampColumnInLine(piece_buffer, desired_line - accumulated_line, desired_col);
+        var accumulated_col: i32 = 0;
+
+        outer: for (self.pieces.items[piece_index..]) |piece, index| {
+            const piece_buffer = piece.getBuffer(self.buffers);
+
+            var column_count: ColumnCount = undefined;
+
+            if (index == 0) {
+                column_count = countColumnsInLine(
+                    piece_buffer,
+                    desired_line - accumulated_line,
+                ) catch unreachable;
+            } else {
+                column_count = countColumnsInLine(piece_buffer, 0) catch unreachable;
+            }
+
+            switch (column_count) {
+                .count => |count| {
+                    accumulated_col += count;
+                    break :outer;
+                },
+                .unfinished_count => |count| {
+                    accumulated_col += count;
+                },
+            }
+        }
+
+        // The above loop calculates the count.
+        // We need to subtract one since cols are 0 based.
+        if (accumulated_col > 0) {
+            accumulated_col -= 1;
+        }
+
+        if (accumulated_col >= desired_col) {
+            return Position{
+                .line = desired_line,
+                .col = desired_col,
+            };
+        }
 
         return Position{
             .line = desired_line,
-            .col = new_col,
+            .col = accumulated_col,
         };
     }
 
@@ -553,27 +596,26 @@ test "utf8At" {
     try std.testing.expectEqual(a, utf8At("😀abcde 😀ghijkl😀", 4));
 }
 
-test "clampColumnInLine" {
+test "countColumnsInLine" {
     const expectEqual = std.testing.expectEqual;
+    const expectError = std.testing.expectError;
 
-    const text =
-        \\
-        \\the big dog
-        \\jumped over the lazy
-        \\
-        \\dog
-        \\
-    ;
-    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 0));
-    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 1));
-    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 2));
-    try expectEqual(@as(i32, 0), clampColumnInLine(text, 0, 3));
+    const text = "\nthe big dog\njumped over the lazy\n\ndog\n\n";
 
-    try expectEqual(@as(i32, 0), clampColumnInLine(text, 1, 0));
-    try expectEqual(@as(i32, 1), clampColumnInLine(text, 1, 1));
-    try expectEqual(@as(i32, 2), clampColumnInLine(text, 1, 2));
-    try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 10));
-    try expectEqual(@as(i32, 10), clampColumnInLine(text, 1, 11));
+    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 0));
+    try expectEqual(ColumnCount{ .count = 11 }, try countColumnsInLine(text, 1));
+    try expectEqual(ColumnCount{ .count = 20 }, try countColumnsInLine(text, 2));
+    try expectEqual(ColumnCount{ .count = 3 }, try countColumnsInLine(text, 4));
+    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 5));
+    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 5));
+    try expectEqual(ColumnCount{ .unfinished_count = 0 }, try countColumnsInLine(text, 6));
+    try expectError(error.InvalidLine, countColumnsInLine(text, 7));
+
+    const text2 = "a dog";
+    try expectEqual(ColumnCount{ .unfinished_count = 5 }, try countColumnsInLine(text2, 0));
+
+    const text3 = "the cat";
+    try expectEqual(ColumnCount{ .unfinished_count = 7 }, try countColumnsInLine(text3, 0));
 }
 
 test "clampPosition" {
@@ -591,19 +633,56 @@ test "clampPosition" {
 
     {
         const pos = pt.clampPosition(-1, 0);
-        try expectEqual(pos, null);
+        try expectEqual(@as(?Position, null), pos);
     }
     {
         const pos = pt.clampPosition(0, 0) orelse unreachable;
-        try expectEqual(pos, .{ .line = 0, .col = 0 });
+        try expectEqual(Position{ .line = 0, .col = 0 }, pos);
+    }
+    {
+        const pos = pt.clampPosition(0, 32) orelse unreachable;
+        try expectEqual(Position{ .line = 0, .col = 31 }, pos);
     }
     {
         const pos = pt.clampPosition(1, 0) orelse unreachable;
-        try expectEqual(pos, .{ .line = 1, .col = 0 });
+        try expectEqual(Position{ .line = 1, .col = 0 }, pos);
     }
     {
         const pos = pt.clampPosition(2, 4) orelse unreachable;
-        try expectEqual(pos, .{ .line = 2, .col = 0 });
+        try expectEqual(Position{ .line = 2, .col = 0 }, pos);
+    }
+}
+
+test "clampPosition with inserts" {
+    const expectEqual = std.testing.expectEqual;
+
+    const str = "the cat";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.insert(0, "a");
+    try assertPieceTableContents(&pt, "athe cat");
+
+    {
+        const pos = pt.clampPosition(0, 7) orelse unreachable;
+        try expectEqual(Position{ .line = 0, .col = 7 }, pos);
+    }
+
+    try pt.insert(0, "a");
+    try assertPieceTableContents(&pt, "aathe cat");
+
+    {
+        const pos = pt.clampPosition(0, 7) orelse unreachable;
+        try expectEqual(Position{ .line = 0, .col = 7 }, pos);
+    }
+    {
+        const pos = pt.clampPosition(0, 8) orelse unreachable;
+        try expectEqual(Position{ .line = 0, .col = 8 }, pos);
+    }
+    {
+        const pos = pt.clampPosition(0, 9) orelse unreachable;
+        try expectEqual(Position{ .line = 0, .col = 8 }, pos);
     }
 }
 
