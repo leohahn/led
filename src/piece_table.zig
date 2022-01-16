@@ -1,10 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const utf8CountCodepoints = std.unicode.utf8CountCodepoints;
+const log = @import("log.zig");
 
 const Position = struct {
     line: i32,
     col: i32,
+    offset: u32,
 };
 
 const Buffer = enum {
@@ -22,6 +25,7 @@ const Piece = struct {
 
     start: u32,
     len: u32,
+    codepoint_count: u32,
     buffer: Buffer,
 
     line_count: i32,
@@ -67,8 +71,14 @@ fn countLinesInString(str: []const u8) i32 {
 }
 
 const ColumnCount = union(enum) {
-    count: i32,
-    unfinished_count: i32,
+    count: struct {
+        columns: i32,
+        codepoints_until_line: u32,
+    },
+    unfinished_count: struct {
+        columns: i32,
+        codepoints_until_line: u32,
+    },
 };
 
 fn countColumnsInLine(string: []const u8, line: i32) !ColumnCount {
@@ -81,9 +91,12 @@ fn countColumnsInLine(string: []const u8, line: i32) !ColumnCount {
     };
 
     var line_ended = false;
+    var codepoints_until_line: u32 = 0;
 
     while (it.nextCodepoint()) |codepoint| {
         if (current_line < line) {
+            codepoints_until_line += 1;
+
             if (codepoint == @as(u21, '\n')) {
                 current_line += 1;
                 column_count = 0;
@@ -109,12 +122,18 @@ fn countColumnsInLine(string: []const u8, line: i32) !ColumnCount {
 
     if (line_ended) {
         return ColumnCount{
-            .count = column_count,
+            .count = .{
+                .columns = column_count,
+                .codepoints_until_line = codepoints_until_line,
+            },
         };
     }
 
     return ColumnCount{
-        .unfinished_count = column_count,
+        .unfinished_count = .{
+            .columns = column_count,
+            .codepoints_until_line = codepoints_until_line,
+        },
     };
 }
 
@@ -173,12 +192,15 @@ pub const PieceTable = struct {
             return error.InvalidUtf8Slice;
         }
 
+        var codepoint_count = try utf8CountCodepoints(original_buffer);
+
         var pieces = try std.ArrayListUnmanaged(Piece).initCapacity(allocator, 8);
         try pieces.append(allocator, Piece{
             .start = 0,
             .len = @intCast(u32, original_buffer.len),
             .buffer = Buffer.original,
             .line_count = countLinesInString(original_buffer),
+            .codepoint_count = @intCast(u32, codepoint_count),
         });
 
         return Self{
@@ -200,7 +222,7 @@ pub const PieceTable = struct {
     pub fn len(self: *Self) u32 {
         var length: u32 = 0;
         for (self.pieces.items) |piece| {
-            const buf_len = std.unicode.utf8CountCodepoints(piece.getBuffer(self.buffers)) catch unreachable;
+            const buf_len = utf8CountCodepoints(piece.getBuffer(self.buffers)) catch unreachable;
             length += @intCast(u32, buf_len);
         }
         return length;
@@ -260,11 +282,17 @@ pub const PieceTable = struct {
                 // do nothing
             },
             .inside_piece => |inside_piece| {
+                log.info("T3");
                 for (self.pieces.items[inside_piece.index..]) |piece, i| {
+                    log.debugf("WILL GET PIECE BUFFER FOR {d}", .{i});
                     const piece_buffer = piece.getBuffer(self.buffers);
                     if (i == 0) {
+                        const s = piece_buffer[inside_piece.offset..];
+                        log.infof("s: {s}", .{s});
                         try str_buf.appendSlice(allocator, piece_buffer[inside_piece.offset..]);
                     } else {
+                        const s = piece_buffer;
+                        log.infof("s: {s}", .{s});
                         try str_buf.appendSlice(allocator, piece_buffer);
                     }
                 }
@@ -288,7 +316,7 @@ pub const PieceTable = struct {
                 try self.pieces.insert(self.allocator, self.pieces.items.len, inserted_piece);
             },
             .inside_piece => |inside_piece| {
-                const slice_len = @intCast(u32, try std.unicode.utf8CountCodepoints(slice));
+                log.info("A5");
                 const piece = self.pieces.items[inside_piece.index];
                 if (inside_piece.offset == 0) {
                     // The position is in the beginning of an existing piece, therefore we only have
@@ -299,25 +327,34 @@ pub const PieceTable = struct {
 
                 const piece_buffer = piece.getBuffer(self.buffers);
 
+                const before_slice = piece_buffer[0..inside_piece.offset];
+                const before_codepoint_count = try utf8CountCodepoints(before_slice);
+
                 const piece_before = Piece{
-                    .start = 0,
-                    .len = inside_piece.offset,
+                    .start = piece.start,
+                    .len = @intCast(u32, before_slice.len),
                     .buffer = piece.buffer,
-                    .line_count = countLinesInString(piece_buffer[0..inside_piece.offset]),
+                    .line_count = countLinesInString(before_slice),
+                    .codepoint_count = @intCast(u32, before_codepoint_count),
                 };
+
+                const after_slice = piece_buffer[inside_piece.offset..];
+                const after_codepoint_count = try utf8CountCodepoints(after_slice);
+
                 const piece_after = Piece{
-                    .start = inside_piece.offset,
-                    .len = slice_len - inside_piece.offset,
+                    .start = piece_before.start + piece_before.len,
+                    .len = @intCast(u32, after_slice.len),
                     .buffer = piece.buffer,
-                    .line_count = countLinesInString(
-                        piece_buffer[inside_piece.offset .. slice_len - inside_piece.offset],
-                    ),
+                    .line_count = countLinesInString(after_slice),
+                    .codepoint_count = @intCast(u32, after_codepoint_count),
                 };
 
                 _ = self.pieces.orderedRemove(inside_piece.index);
                 try self.pieces.insert(self.allocator, inside_piece.index, piece_after);
                 try self.pieces.insert(self.allocator, inside_piece.index, inserted_piece);
                 try self.pieces.insert(self.allocator, inside_piece.index, piece_before);
+
+                log.info("A8");
             },
         }
     }
@@ -345,6 +382,7 @@ pub const PieceTable = struct {
 
         var maybe_piece_index: ?u32 = null;
         var accumulated_line: i32 = 0;
+        var accumulated_offset: u32 = 0;
 
         for (self.pieces.items) |piece, index| {
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
@@ -353,6 +391,7 @@ pub const PieceTable = struct {
                 break;
             }
             accumulated_line = new_accumulated_line;
+            accumulated_offset += piece.codepoint_count;
         }
 
         const piece_index = maybe_piece_index orelse return null;
@@ -375,11 +414,13 @@ pub const PieceTable = struct {
 
             switch (column_count) {
                 .count => |count| {
-                    accumulated_col += count;
+                    accumulated_col += count.columns;
+                    accumulated_offset += count.codepoints_until_line;
                     break :outer;
                 },
                 .unfinished_count => |count| {
-                    accumulated_col += count;
+                    accumulated_col += count.columns;
+                    accumulated_offset += count.codepoints_until_line;
                 },
             }
         }
@@ -394,12 +435,14 @@ pub const PieceTable = struct {
             return Position{
                 .line = desired_line,
                 .col = desired_col,
+                .offset = accumulated_offset + @intCast(u32, desired_col),
             };
         }
 
         return Position{
             .line = desired_line,
             .col = accumulated_col,
+            .offset = accumulated_offset + @intCast(u32, accumulated_col),
         };
     }
 
@@ -407,11 +450,14 @@ pub const PieceTable = struct {
         const start = @intCast(u32, self.buffers.append.items.len);
         const slice_len = @intCast(u32, slice.len);
         try self.buffers.append.appendSlice(self.allocator, slice);
+
+        const codepoint_count = try utf8CountCodepoints(slice);
         const inserted_piece = Piece{
             .buffer = Buffer.append,
             .start = start,
             .len = slice_len,
             .line_count = countLinesInString(self.buffers.append.items[start .. start + slice_len]),
+            .codepoint_count = @intCast(u32, codepoint_count),
         };
         return inserted_piece;
     }
@@ -425,7 +471,7 @@ pub const PieceTable = struct {
 
         for (self.pieces.items) |piece, index| {
             const buffer = piece.getBuffer(self.buffers);
-            const buffer_rune_count = @intCast(u32, std.unicode.utf8CountCodepoints(buffer) catch unreachable);
+            const buffer_rune_count = @intCast(u32, utf8CountCodepoints(buffer) catch unreachable);
 
             accumulated_rune_offset += buffer_rune_count;
             accumulated_byte_offset += @intCast(u32, buffer.len);
@@ -526,7 +572,18 @@ test "can insert into the end of a piece table" {
     try assertPieceTableContents(&pt, "The dog is a nice animal.\nThe cat is also cool.NEW");
 }
 
-test "can insert into the beginning" {
+test "can insert into the middle: case 1" {
+    var pt = try PieceTable.initFromString(std.testing.allocator, "abcdefghij\n");
+    defer pt.deinit();
+
+    try assertPieceTableContents(&pt, "abcdefghij\n");
+
+    try pt.insert(2, "a");
+
+    try assertPieceTableContents(&pt, "abacdefghij\n");
+}
+
+test "can insert into the beginning multiple times" {
     var pt = try PieceTable.initFromString(std.testing.allocator,
         \\The dog is a nice animal.
         \\The cat is also cool.
@@ -602,20 +659,35 @@ test "countColumnsInLine" {
 
     const text = "\nthe big dog\njumped over the lazy\n\ndog\n\n";
 
-    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 0));
-    try expectEqual(ColumnCount{ .count = 11 }, try countColumnsInLine(text, 1));
-    try expectEqual(ColumnCount{ .count = 20 }, try countColumnsInLine(text, 2));
-    try expectEqual(ColumnCount{ .count = 3 }, try countColumnsInLine(text, 4));
-    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 5));
-    try expectEqual(ColumnCount{ .count = 0 }, try countColumnsInLine(text, 5));
-    try expectEqual(ColumnCount{ .unfinished_count = 0 }, try countColumnsInLine(text, 6));
+    try expectEqual(
+        ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 0 } }, 
+        try countColumnsInLine(text, 0));
+    try expectEqual(
+        ColumnCount{ .count = .{ .columns = 11, .codepoints_until_line = 1 } }, 
+        try countColumnsInLine(text, 1));
+    try expectEqual(
+        ColumnCount{ .count = .{ .columns = 20, .codepoints_until_line = 13 } }, 
+        try countColumnsInLine(text, 2));
+    try expectEqual(
+        ColumnCount{ .count = .{ .columns = 3, .codepoints_until_line = 35 } }, 
+        try countColumnsInLine(text, 4));
+    try expectEqual(
+        ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 39 } }, 
+        try countColumnsInLine(text, 5));
+    try expectEqual(
+        ColumnCount{ .unfinished_count = .{ .columns = 0, .codepoints_until_line = 40 } }, 
+        try countColumnsInLine(text, 6));
     try expectError(error.InvalidLine, countColumnsInLine(text, 7));
 
     const text2 = "a dog";
-    try expectEqual(ColumnCount{ .unfinished_count = 5 }, try countColumnsInLine(text2, 0));
+    try expectEqual(
+        ColumnCount{ .unfinished_count = .{ .columns = 5, .codepoints_until_line = 0 } }, 
+        try countColumnsInLine(text2, 0));
 
     const text3 = "the cat";
-    try expectEqual(ColumnCount{ .unfinished_count = 7 }, try countColumnsInLine(text3, 0));
+    try expectEqual(
+        ColumnCount{ .unfinished_count = .{ .columns = 7, .codepoints_until_line = 0 } }, 
+        try countColumnsInLine(text3, 0));
 }
 
 test "clampPosition" {
@@ -637,19 +709,19 @@ test "clampPosition" {
     }
     {
         const pos = pt.clampPosition(0, 0) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 0 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 0, .offset = 0 }, pos);
     }
     {
         const pos = pt.clampPosition(0, 32) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 31 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 31, .offset = 31 }, pos);
     }
     {
         const pos = pt.clampPosition(1, 0) orelse unreachable;
-        try expectEqual(Position{ .line = 1, .col = 0 }, pos);
+        try expectEqual(Position{ .line = 1, .col = 0, .offset = 33 }, pos);
     }
     {
         const pos = pt.clampPosition(2, 4) orelse unreachable;
-        try expectEqual(Position{ .line = 2, .col = 0 }, pos);
+        try expectEqual(Position{ .line = 2, .col = 0, .offset = 59 }, pos);
     }
 }
 
@@ -666,7 +738,7 @@ test "clampPosition with inserts" {
 
     {
         const pos = pt.clampPosition(0, 7) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 7 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 7, .offset = 7 }, pos);
     }
 
     try pt.insert(0, "a");
@@ -674,15 +746,15 @@ test "clampPosition with inserts" {
 
     {
         const pos = pt.clampPosition(0, 7) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 7 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 7, .offset = 7 }, pos);
     }
     {
         const pos = pt.clampPosition(0, 8) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 8 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 8, .offset = 8 }, pos);
     }
     {
         const pos = pt.clampPosition(0, 9) orelse unreachable;
-        try expectEqual(Position{ .line = 0, .col = 8 }, pos);
+        try expectEqual(Position{ .line = 0, .col = 8, .offset = 8 }, pos);
     }
 }
 

@@ -59,6 +59,7 @@ fn cursorDown(buffer: *Buffer, table: *const PieceTable) void {
 
     buffer.cursor.line = .{ .val = pos.line };
     buffer.cursor.render_col = .{ .val = pos.col };
+    buffer.cursor.table_offset = pos.offset;
 }
 
 fn cursorUp(buffer: *Buffer, table: *const PieceTable) void {
@@ -67,6 +68,7 @@ fn cursorUp(buffer: *Buffer, table: *const PieceTable) void {
 
     buffer.cursor.line = .{ .val = pos.line };
     buffer.cursor.render_col = .{ .val = pos.col };
+    buffer.cursor.table_offset = pos.offset;
 }
 
 fn cursorLeft(buffer: *Buffer, table: *const PieceTable) void {
@@ -76,6 +78,7 @@ fn cursorLeft(buffer: *Buffer, table: *const PieceTable) void {
     buffer.cursor.line = .{ .val = pos.line };
     buffer.cursor.render_col = .{ .val = pos.col };
     buffer.cursor.col = buffer.cursor.render_col;
+    buffer.cursor.table_offset = pos.offset;
 }
 
 fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
@@ -85,6 +88,7 @@ fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
     buffer.cursor.line = .{ .val = pos.line };
     buffer.cursor.render_col = .{ .val = pos.col };
     buffer.cursor.col = buffer.cursor.render_col;
+    buffer.cursor.table_offset = pos.offset;
 }
 
 const VimMode = enum {
@@ -208,6 +212,7 @@ fn processCommand(
             }
         },
         .insert => |str| {
+            log.infof("inserting into offset {d}", .{buffer.cursor.table_offset});
             try table.insert(buffer.cursor.table_offset, str);
             try buffer.updateContents(table);
         },
