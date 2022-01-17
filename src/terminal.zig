@@ -17,6 +17,7 @@ pub const KeyEvent = union(enum) {
     end,
 
     esc,
+    backspace,
 
     const Self = @This();
 
@@ -29,128 +30,6 @@ pub const KeyEvent = union(enum) {
         }
     }
 };
-
-// pub const Key = enum(i32) {
-//     const Self = @This();
-
-//     unknown = -1,
-
-//     a = 'a',
-//     b = 'b',
-//     c = 'c',
-//     d = 'd',
-//     e = 'e',
-//     f = 'f',
-//     g = 'g',
-//     h = 'h',
-//     i = 'i',
-//     j = 'j',
-//     k = 'k',
-//     l = 'l',
-//     m = 'm',
-//     n = 'n',
-//     o = 'o',
-//     p = 'p',
-//     q = 'q',
-//     r = 'r',
-//     s = 's',
-//     t = 't',
-//     u = 'u',
-//     v = 'v',
-//     x = 'x',
-//     w = 'w',
-//     y = 'y',
-//     z = 'z',
-
-//     A = 'A',
-//     B = 'B',
-//     C = 'C',
-//     D = 'D',
-//     E = 'E',
-//     F = 'F',
-//     G = 'G',
-//     H = 'H',
-//     I = 'I',
-//     J = 'J',
-//     K = 'K',
-//     L = 'L',
-//     M = 'M',
-//     N = 'N',
-//     O = 'O',
-//     P = 'P',
-//     Q = 'Q',
-//     R = 'R',
-//     S = 'S',
-//     T = 'T',
-//     U = 'U',
-//     V = 'V',
-//     X = 'X',
-//     W = 'W',
-//     Y = 'Y',
-//     Z = 'Z',
-
-//     num_0 = '0',
-//     num_1 = '1',
-//     num_2 = '2',
-//     num_3 = '3',
-//     num_4 = '4',
-//     num_5 = '5',
-//     num_6 = '6',
-//     num_7 = '7',
-//     num_8 = '8',
-//     num_9 = '9',
-
-//     semicolon = ';',
-//     colon = ':',
-//     greater = '>',
-//     smaller = '<',
-//     equal = '=',
-
-//     hash = '#',
-//     at = '@',
-//     bang = '!',
-//     dollar = '$',
-//     percent = '%',
-//     caret = '^',
-//     ampersand = '&',
-//     asterisk = '*',
-//     open_parenthesis = '(',
-//     close_parenthesis = ')',
-//     minus = '-',
-//     plus = '+',
-//     open_bracket = '[',
-//     close_bracket = ']',
-//     open_brace = '{',
-//     close_brace = '}',
-//     underline = '_',
-//     tilde = '~',
-//     quote = '\'',
-//     double_quote = '"',
-//     question_mark = '?',
-//     slash = '/',
-//     backslash = '\\',
-//     space = ' ',
-
-//     up = 1000,
-//     down = 1001,
-//     left = 1002,
-//     right = 1003,
-
-//     del = 1004,
-//     page_up = 1005,
-//     page_down = 1006,
-//     home = 1007,
-//     end = 1008,
-
-//     esc = 27,
-
-//     fn isDigit(self: Self) bool {
-//         return switch (self) {
-//             .num_0, .num_1, .num_2, .num_3, .num_4, .num_5, .num_6, .num_7, .num_8, .num_9 => true,
-//             else => false,
-//         };
-//     }
-// };
 
 pub fn readInputEvent() !?KeyEvent {
     var stdin = std.io.getStdIn();
@@ -208,6 +87,14 @@ pub fn readInputEvent() !?KeyEvent {
         return KeyEvent{
             .char = buffer[0],
         };
+    }
+
+    if (buffer[0] == 8) {
+        return .backspace;
+    }
+
+    if (buffer[0] == 127) {
+        return .backspace;
     }
 
     return .unknown;

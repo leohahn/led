@@ -302,6 +302,13 @@ pub const PieceTable = struct {
         return str_buf.toOwnedSlice(allocator);
     }
 
+    pub fn delete(self: *Self, start_pos: u32, end_pos: u32) !void {
+        _ = self;
+        _ = start_pos;
+        _ = end_pos;
+        unreachable;
+    }
+
     pub fn insert(self: *Self, position: u32, slice: []const u8) !void {
         if (!std.unicode.utf8ValidateSlice(slice)) {
             return error.InvalidUtf8Slice;

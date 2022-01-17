@@ -107,6 +107,7 @@ const Command = union(enum) {
     goto_end_of_line,
     goto_start_of_line,
     insert: u8,
+    remove_here,
     noop,
 };
 
@@ -167,6 +168,9 @@ const VimEmulator = struct {
             },
             .end => {
                 return .goto_end_of_line;
+            },
+            .backspace => {
+                return .remove_here;
             },
             else => {
                 return .noop;
@@ -230,6 +234,9 @@ fn processCommand(
             try table.insert(buffer.cursor.table_offset, &buf);
             try buffer.updateContents(table);
             cursorRight(buffer, table);
+        },
+        .remove_here => {
+            try table.delete(0, 1);
         },
         .noop => {
             // do nothing.
