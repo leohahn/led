@@ -1,129 +1,158 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-pub const Key = enum(i32) {
+pub const KeyEvent = union(enum) {
+    char: u8,
+    unknown,
+
+    up,
+    down,
+    left,
+    right,
+
+    del,
+    page_up,
+    page_down,
+    home,
+    end,
+
+    esc,
+
     const Self = @This();
 
-    unknown = -1,
-
-    a = 'a',
-    b = 'b',
-    c = 'c',
-    d = 'd',
-    e = 'e',
-    f = 'f',
-    g = 'g',
-    h = 'h',
-    i = 'i',
-    j = 'j',
-    k = 'k',
-    l = 'l',
-    m = 'm',
-    n = 'n',
-    o = 'o',
-    p = 'p',
-    q = 'q',
-    r = 'r',
-    s = 's',
-    t = 't',
-    u = 'u',
-    v = 'v',
-    x = 'x',
-    w = 'w',
-    y = 'y',
-    z = 'z',
-
-    A = 'A',
-    B = 'B',
-    C = 'C',
-    D = 'D',
-    E = 'E',
-    F = 'F',
-    G = 'G',
-    H = 'H',
-    I = 'I',
-    J = 'J',
-    K = 'K',
-    L = 'L',
-    M = 'M',
-    N = 'N',
-    O = 'O',
-    P = 'P',
-    Q = 'Q',
-    R = 'R',
-    S = 'S',
-    T = 'T',
-    U = 'U',
-    V = 'V',
-    X = 'X',
-    W = 'W',
-    Y = 'Y',
-    Z = 'Z',
-
-    num_0 = '0',
-    num_1 = '1',
-    num_2 = '2',
-    num_3 = '3',
-    num_4 = '4',
-    num_5 = '5',
-    num_6 = '6',
-    num_7 = '7',
-    num_8 = '8',
-    num_9 = '9',
-
-    semicolon = ';',
-    colon = ':',
-    greater = '>',
-    smaller = '<',
-    equal = '=',
-
-    hash = '#',
-    at = '@',
-    bang = '!',
-    dollar = '$',
-    percent = '%',
-    caret = '^',
-    ampersand = '&',
-    asterisk = '*',
-    open_parenthesis = '(',
-    close_parenthesis = ')',
-    minus = '-',
-    plus = '+',
-    open_bracket = '[',
-    close_bracket = ']',
-    open_brace = '{',
-    close_brace = '}',
-    underline = '_',
-    tilde = '~',
-    quote = '\'',
-    double_quote = '"',
-    question_mark = '?',
-    slash = '/',
-    backslash = '\\',
-    space = ' ',
-
-    up = 1000,
-    down = 1001,
-    left = 1002,
-    right = 1003,
-
-    del = 1004,
-    page_up = 1005,
-    page_down = 1006,
-    home = 1007,
-    end = 1008,
-
-    esc = 27,
-
     fn isDigit(self: Self) bool {
-        return switch (self) {
-            .num_0, .num_1, .num_2, .num_3, .num_4, .num_5, .num_6, .num_7, .num_8, .num_9 => true,
-            else => false,
-        };
+        switch (self) {
+            .char => |c| {
+                return c >= '0' and c <= '9';
+            },
+            else => return false,
+        }
     }
 };
 
-pub fn readInputEvent() !?Key {
+// pub const Key = enum(i32) {
+//     const Self = @This();
+
+//     unknown = -1,
+
+//     a = 'a',
+//     b = 'b',
+//     c = 'c',
+//     d = 'd',
+//     e = 'e',
+//     f = 'f',
+//     g = 'g',
+//     h = 'h',
+//     i = 'i',
+//     j = 'j',
+//     k = 'k',
+//     l = 'l',
+//     m = 'm',
+//     n = 'n',
+//     o = 'o',
+//     p = 'p',
+//     q = 'q',
+//     r = 'r',
+//     s = 's',
+//     t = 't',
+//     u = 'u',
+//     v = 'v',
+//     x = 'x',
+//     w = 'w',
+//     y = 'y',
+//     z = 'z',
+
+//     A = 'A',
+//     B = 'B',
+//     C = 'C',
+//     D = 'D',
+//     E = 'E',
+//     F = 'F',
+//     G = 'G',
+//     H = 'H',
+//     I = 'I',
+//     J = 'J',
+//     K = 'K',
+//     L = 'L',
+//     M = 'M',
+//     N = 'N',
+//     O = 'O',
+//     P = 'P',
+//     Q = 'Q',
+//     R = 'R',
+//     S = 'S',
+//     T = 'T',
+//     U = 'U',
+//     V = 'V',
+//     X = 'X',
+//     W = 'W',
+//     Y = 'Y',
+//     Z = 'Z',
+
+//     num_0 = '0',
+//     num_1 = '1',
+//     num_2 = '2',
+//     num_3 = '3',
+//     num_4 = '4',
+//     num_5 = '5',
+//     num_6 = '6',
+//     num_7 = '7',
+//     num_8 = '8',
+//     num_9 = '9',
+
+//     semicolon = ';',
+//     colon = ':',
+//     greater = '>',
+//     smaller = '<',
+//     equal = '=',
+
+//     hash = '#',
+//     at = '@',
+//     bang = '!',
+//     dollar = '$',
+//     percent = '%',
+//     caret = '^',
+//     ampersand = '&',
+//     asterisk = '*',
+//     open_parenthesis = '(',
+//     close_parenthesis = ')',
+//     minus = '-',
+//     plus = '+',
+//     open_bracket = '[',
+//     close_bracket = ']',
+//     open_brace = '{',
+//     close_brace = '}',
+//     underline = '_',
+//     tilde = '~',
+//     quote = '\'',
+//     double_quote = '"',
+//     question_mark = '?',
+//     slash = '/',
+//     backslash = '\\',
+//     space = ' ',
+
+//     up = 1000,
+//     down = 1001,
+//     left = 1002,
+//     right = 1003,
+
+//     del = 1004,
+//     page_up = 1005,
+//     page_down = 1006,
+//     home = 1007,
+//     end = 1008,
+
+//     esc = 27,
+
+//     fn isDigit(self: Self) bool {
+//         return switch (self) {
+//             .num_0, .num_1, .num_2, .num_3, .num_4, .num_5, .num_6, .num_7, .num_8, .num_9 => true,
+//             else => false,
+//         };
+//     }
+// };
+
+pub fn readInputEvent() !?KeyEvent {
     var stdin = std.io.getStdIn();
     var buffer = [1]u8{0};
     const nread = try stdin.read(&buffer);
@@ -176,13 +205,15 @@ pub fn readInputEvent() !?Key {
     }
 
     if (buffer[0] >= 32 and buffer[0] <= 126) {
-        return @intToEnum(Key, buffer[0]);
+        return KeyEvent{
+            .char = buffer[0],
+        };
     }
 
     return .unknown;
 }
 
-pub fn ctrlKey(key: u8) u8 {
+pub fn ctrlKeyEvent(key: u8) u8 {
     return key & 0x1f;
 }
 
@@ -217,34 +248,32 @@ pub const Position = struct {
     }
 };
 
-fn readKey(key: Key) !void {
-    const got_key = try readInputEvent();
-    if (got_key == null) {
+fn readKeyEvent(key: KeyEvent) !void {
+    const got_key = (try readInputEvent()) orelse {
         return error.NoResponseFromTerminal;
-    }
-    if (got_key != key) {
+    };
+    if (!std.meta.eql(key, got_key)) {
         return error.GotDifferentChar;
     }
 }
 
-fn readIntUntil(int_type: anytype, until: Key) !i32 {
+fn readIntUntil(int_type: anytype, until: KeyEvent) !i32 {
     var int_buffer = [1]u8{0} ** 32;
     var bytes_read: usize = 0;
 
     while (true) {
-        var key = try readInputEvent();
-        if (key == null) {
+        var key = (try readInputEvent()) orelse {
             break;
-        }
+        };
 
-        if (!key.?.isDigit()) {
-            if (until != key.?) {
+        if (!key.isDigit()) {
+            if (!std.meta.eql(until, key)) {
                 return error.UnexpectedEnding;
             }
             break;
         }
 
-        int_buffer[bytes_read] = @intCast(u8, @enumToInt(key.?));
+        int_buffer[bytes_read] = @intCast(u8, @enumToInt(key));
         bytes_read += 1;
 
         assert(bytes_read <= 32);
@@ -265,10 +294,10 @@ pub fn getCursorPosition() !Position {
     _ = try stdout.write("\x1b[6n");
 
     // read cursor position.
-    try readKey(Key.esc);
-    try readKey(Key.open_brace);
-    const line = try readIntUntil(i32, Key.semicolon);
-    const col = try readIntUntil(i32, Key.R);
+    try readKeyEvent(KeyEvent.esc);
+    try readKeyEvent(.{ .char = '[' });
+    const line = try readIntUntil(i32, .{ .char = ';' });
+    const col = try readIntUntil(i32, .{ .char = 'R' });
 
     return Position{
         .line = .{ .val = line - 1 },

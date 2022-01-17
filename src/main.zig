@@ -106,7 +106,7 @@ const Command = union(enum) {
     half_screen_down,
     goto_end_of_line,
     goto_start_of_line,
-    insert: []const u8,
+    insert: u8,
     noop,
 };
 
@@ -115,27 +115,45 @@ const VimEmulator = struct {
 
     const Self = @This();
 
-    fn processKey(self: *Self, key: terminal.Key) Command {
+    fn processKey(self: *Self, key_event: terminal.KeyEvent) Command {
         _ = self;
         // switch (self.mode) {
         //     .normal => {},
         //     .insert => {},
         // }
 
-        switch (key) {
-            .q => {
-                return .quit;
+        switch (key_event) {
+            .char => |c| {
+                if (c == 'q') {
+                    return .quit;
+                }
+                if (c == 'j') {
+                    return .cursor_down;
+                }
+                if (c == 'k') {
+                    return .cursor_up;
+                }
+                if (c == 'h') {
+                    return .cursor_left;
+                }
+                if (c == 'l') {
+                    return .cursor_right;
+                }
+
+                return Command{
+                    .insert = c,
+                };
             },
-            .j, .down => {
+            .down => {
                 return .cursor_down;
             },
-            .k, .up => {
+            .up => {
                 return .cursor_up;
             },
-            .h, .left => {
+            .left => {
                 return .cursor_left;
             },
-            .l, .right => {
+            .right => {
                 return .cursor_right;
             },
             .page_up => {
@@ -149,11 +167,6 @@ const VimEmulator = struct {
             },
             .end => {
                 return .goto_end_of_line;
-            },
-            .a => {
-                return Command{
-                    .insert = "a",
-                };
             },
             else => {
                 return .noop;
@@ -211,10 +224,12 @@ fn processCommand(
                 cursorLeft(buffer, table);
             }
         },
-        .insert => |str| {
+        .insert => |c| {
             log.infof("inserting into offset {d}", .{buffer.cursor.table_offset});
-            try table.insert(buffer.cursor.table_offset, str);
+            var buf = [1]u8{c};
+            try table.insert(buffer.cursor.table_offset, &buf);
             try buffer.updateContents(table);
+            cursorRight(buffer, table);
         },
         .noop => {
             // do nothing.
