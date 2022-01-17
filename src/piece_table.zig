@@ -316,16 +316,15 @@ pub const PieceTable = struct {
                 try self.pieces.insert(self.allocator, self.pieces.items.len, inserted_piece);
             },
             .inside_piece => |inside_piece| {
-                log.info("A5");
                 const piece = self.pieces.items[inside_piece.index];
+                const piece_buffer = piece.getBuffer(self.buffers);
+
                 if (inside_piece.offset == 0) {
                     // The position is in the beginning of an existing piece, therefore we only have
                     // to add the new piece before the current one.
                     try self.pieces.insert(self.allocator, inside_piece.index, inserted_piece);
                     return;
                 }
-
-                const piece_buffer = piece.getBuffer(self.buffers);
 
                 const before_slice = piece_buffer[0..inside_piece.offset];
                 const before_codepoint_count = try utf8CountCodepoints(before_slice);
@@ -466,22 +465,22 @@ pub const PieceTable = struct {
         var piece_index: ?u32 = null;
         var piece_offset: u32 = 0;
 
-        var accumulated_byte_offset: u32 = 0;
-        var accumulated_rune_offset: u32 = 0;
+        var accumulated_byte_count: u32 = 0;
+        var accumulated_rune_count: u32 = 0;
 
         for (self.pieces.items) |piece, index| {
             const buffer = piece.getBuffer(self.buffers);
             const buffer_rune_count = @intCast(u32, utf8CountCodepoints(buffer) catch unreachable);
 
-            accumulated_rune_offset += buffer_rune_count;
-            accumulated_byte_offset += @intCast(u32, buffer.len);
+            accumulated_rune_count += buffer_rune_count;
+            accumulated_byte_count += @intCast(u32, buffer.len);
 
-            if (accumulated_rune_offset <= rune_position) {
+            if (accumulated_rune_count <= rune_position) {
                 continue;
             }
 
             const offset = findBytePositionFromRune(
-                rune_position - (accumulated_rune_offset - buffer_rune_count),
+                rune_position - (accumulated_rune_count - buffer_rune_count),
                 buffer,
             );
 
@@ -490,13 +489,12 @@ pub const PieceTable = struct {
             }
 
             piece_index = @intCast(u32, index);
-            piece_offset = (accumulated_byte_offset - @intCast(u32, buffer.len)) + offset.?;
-
+            piece_offset = offset.?;
             break;
         }
 
         if (piece_index == null) {
-            if (accumulated_rune_offset == rune_position) {
+            if (accumulated_rune_count == rune_position) {
                 return PiecePosition.end_of_buffer;
             }
             return null;
@@ -578,9 +576,10 @@ test "can insert into the middle: case 1" {
 
     try assertPieceTableContents(&pt, "abcdefghij\n");
 
-    try pt.insert(2, "a");
+    try pt.insert(2, "|");
+    try pt.insert(2, "|");
 
-    try assertPieceTableContents(&pt, "abacdefghij\n");
+    try assertPieceTableContents(&pt, "ab||cdefghij\n");
 }
 
 test "can insert into the beginning multiple times" {
