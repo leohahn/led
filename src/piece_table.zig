@@ -302,11 +302,64 @@ pub const PieceTable = struct {
         return str_buf.toOwnedSlice(allocator);
     }
 
+    fn deleteBetweenPieces(
+        self: *Self,
+        start_piece_index: u32,
+        start_piece_offset: u32,
+        _: u32,
+        _: u32,
+    ) !void {
+        const start_piece = self.pieces.items[start_piece_index];
+        const start_piece_buffer = start_piece.getBuffer(self.buffers);
+
+        var piece_before: ?Piece = null;
+        if (start_piece_offset > 0) {
+            const piece_before_len = start_piece_offset;
+            const piece_before_buffer = start_piece_buffer[0..piece_before_len];
+            const codepoint_count = try utf8CountCodepoints(piece_before_buffer);
+
+            piece_before = Piece{
+                .buffer = start_piece.buffer,
+                .start = start_piece.start,
+                .len = piece_before_len,
+                .codepoint_count = @intCast(u32, codepoint_count),
+                .line_count = countLinesInString(piece_before_buffer),
+            };
+        }
+
+        // var piece_after: ?Piece = null;
+
+    }
+
     pub fn delete(self: *Self, start_pos: u32, end_pos: u32) !void {
-        _ = self;
-        _ = start_pos;
-        _ = end_pos;
-        unreachable;
+        const start_piece_position = self.findPosition(start_pos) orelse return error.InvalidPosition;
+        const end_piece_position = self.findPosition(end_pos) orelse return error.InvalidPosition;
+
+        switch (start_piece_position) {
+            .end_of_buffer => {
+                return;
+            },
+            .inside_piece => |start| {
+                switch (end_piece_position) {
+                    .end_of_buffer => {
+                        try self.deleteBetweenPieces(
+                            start.index,
+                            start.offset,
+                            @intCast(u32, self.pieces.items.len) - 1,
+                            self.pieces.items[self.pieces.items.len - 1].len - 1,
+                        );
+                    },
+                    .inside_piece => |end| {
+                        try self.deleteBetweenPieces(
+                            start.index,
+                            start.offset,
+                            end.index,
+                            end.offset,
+                        );
+                    },
+                }
+            },
+        }
     }
 
     pub fn insert(self: *Self, position: u32, slice: []const u8) !void {

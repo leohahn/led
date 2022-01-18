@@ -172,6 +172,11 @@ const VimEmulator = struct {
             .backspace => {
                 return .remove_here;
             },
+            .enter => {
+                return Command{
+                    .insert = '\n',
+                };
+            },
             else => {
                 return .noop;
             },

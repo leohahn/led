@@ -18,6 +18,7 @@ pub const KeyEvent = union(enum) {
 
     esc,
     backspace,
+    enter,
 
     const Self = @This();
 
@@ -95,6 +96,10 @@ pub fn readInputEvent() !?KeyEvent {
 
     if (buffer[0] == 127) {
         return .backspace;
+    }
+
+    if (buffer[0] == 13) {
+        return .enter;
     }
 
     return .unknown;
