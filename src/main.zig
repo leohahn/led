@@ -241,7 +241,9 @@ fn processCommand(
             cursorRight(buffer, table);
         },
         .remove_here => {
-            try table.delete(0, 1);
+            try table.remove(buffer.cursor.table_offset, buffer.cursor.table_offset);
+            try buffer.updateContents(table);
+            cursorLeft(buffer, table);
         },
         .noop => {
             // do nothing.
@@ -308,7 +310,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
                 .line = line,
                 .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
             });
-            _ = try writer.write("STATUS LINE");
+            _ = try writer.print("{d}:{d}", .{buffer.cursor.line.val, buffer.cursor.col.val});
             continue;
         }
 

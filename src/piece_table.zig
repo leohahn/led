@@ -302,36 +302,99 @@ pub const PieceTable = struct {
         return str_buf.toOwnedSlice(allocator);
     }
 
-    fn deleteBetweenPieces(
+    fn removeBetweenPieces(
         self: *Self,
         start_piece_index: u32,
         start_piece_offset: u32,
-        _: u32,
-        _: u32,
+        end_piece_index: u32,
+        end_piece_offset: u32,
     ) !void {
         const start_piece = self.pieces.items[start_piece_index];
         const start_piece_buffer = start_piece.getBuffer(self.buffers);
 
-        var piece_before: ?Piece = null;
-        if (start_piece_offset > 0) {
-            const piece_before_len = start_piece_offset;
-            const piece_before_buffer = start_piece_buffer[0..piece_before_len];
-            const codepoint_count = try utf8CountCodepoints(piece_before_buffer);
+        log.infof("removing between: {d}|{d} {d}|{d}", .{
+            start_piece_index,
+            start_piece_offset,
+            end_piece_index,
+            end_piece_offset,
+        });
 
-            piece_before = Piece{
-                .buffer = start_piece.buffer,
-                .start = start_piece.start,
-                .len = piece_before_len,
-                .codepoint_count = @intCast(u32, codepoint_count),
-                .line_count = countLinesInString(piece_before_buffer),
-            };
+        var piece_before: ?Piece = blk: {
+            if (start_piece_offset > 0) {
+                const piece_before_len = start_piece_offset;
+                const piece_before_buffer = start_piece_buffer[0..piece_before_len];
+                const codepoint_count = try utf8CountCodepoints(piece_before_buffer);
+
+                break :blk Piece{
+                    .buffer = start_piece.buffer,
+                    .start = start_piece.start,
+                    .len = piece_before_len,
+                    .codepoint_count = @intCast(u32, codepoint_count),
+                    .line_count = countLinesInString(piece_before_buffer),
+                };
+            }
+
+            break :blk null;
+        };
+
+        const end_piece = self.pieces.items[end_piece_index];
+        const end_piece_buffer = end_piece.getBuffer(self.buffers);
+
+        var piece_after: ?Piece = blk: {
+            if (end_piece_offset < end_piece_buffer.len - 1) {
+                const piece_after_len = end_piece_offset;
+                const piece_after_buffer = end_piece_buffer[0..piece_after_len];
+                const codepoint_count = try utf8CountCodepoints(piece_after_buffer);
+
+                break :blk Piece{
+                    .buffer = start_piece.buffer,
+                    .start = end_piece.start + end_piece_offset + 1,
+                    .len = @intCast(u32, end_piece.len) - end_piece_offset - 1,
+                    .codepoint_count = @intCast(u32, codepoint_count),
+                    .line_count = countLinesInString(piece_after_buffer),
+                };
+            }
+
+            break :blk null;
+        };
+
+        // Remove all pieces between the indexes given as parameters.
+        var index: usize = start_piece_index;
+        while (index <= end_piece_index) : (index += 1) {
+            _ = self.pieces.orderedRemove(start_piece_index);
         }
 
-        // var piece_after: ?Piece = null;
+        if (piece_before != null) {
+            log.infof("piece before: start={d} len={d}", .{
+                piece_before.?.start,
+                piece_before.?.len,
+            });
 
+            try self.pieces.insert(self.allocator, start_piece_index, piece_before.?);
+        }
+
+        log.infof("AAAAAAA: {d}|{d}", .{
+            start_piece_index + 1,
+            self.pieces.items.len,
+        });
+
+        if (piece_after != null) {
+            log.infof("piece after: start={d} len={d}", .{
+                piece_after.?.start,
+                piece_after.?.len,
+            });
+
+            if (self.pieces.items.len < (start_piece_index + 1)) {
+                try self.pieces.append(self.allocator, piece_after.?);
+            } else if ((start_piece_index + 1) == self.pieces.items.len) {
+                try self.pieces.append(self.allocator, piece_after.?);
+            } else {
+                try self.pieces.insert(self.allocator, start_piece_index + 1, piece_after.?);
+            }
+        }
     }
 
-    pub fn delete(self: *Self, start_pos: u32, end_pos: u32) !void {
+    pub fn remove(self: *Self, start_pos: u32, end_pos: u32) !void {
         const start_piece_position = self.findPosition(start_pos) orelse return error.InvalidPosition;
         const end_piece_position = self.findPosition(end_pos) orelse return error.InvalidPosition;
 
@@ -342,7 +405,7 @@ pub const PieceTable = struct {
             .inside_piece => |start| {
                 switch (end_piece_position) {
                     .end_of_buffer => {
-                        try self.deleteBetweenPieces(
+                        try self.removeBetweenPieces(
                             start.index,
                             start.offset,
                             @intCast(u32, self.pieces.items.len) - 1,
@@ -350,7 +413,7 @@ pub const PieceTable = struct {
                         );
                     },
                     .inside_piece => |end| {
-                        try self.deleteBetweenPieces(
+                        try self.removeBetweenPieces(
                             start.index,
                             start.offset,
                             end.index,
@@ -855,4 +918,73 @@ test "toString" {
         defer if (s.len > 0) allocator.free(s);
         try expectEqualStrings("", s);
     }
+}
+
+test "remove all" {
+    // const expectEqual = std.testing.expectEqual;
+
+    const str = "the cat is fluffy";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.remove(0, str.len - 1);
+    try assertPieceTableContents(&pt, "");
+}
+
+test "remove partially" {
+    // const expectEqual = std.testing.expectEqual;
+
+    const str = "the cat is fluffy";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.remove(0, 4);
+
+    try assertPieceTableContents(&pt, "at is fluffy");
+
+    try pt.remove(0, 0);
+
+    try assertPieceTableContents(&pt, "t is fluffy");
+
+    try pt.remove(2, 3);
+
+    try assertPieceTableContents(&pt, "t  fluffy");
+
+    try pt.remove(6, 8);
+
+    try assertPieceTableContents(&pt, "t  flu");
+}
+
+test "remove with inserts" {
+    // const expectEqual = std.testing.expectEqual;
+
+    const str = "the cat is fluffy";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.insert(0, "x");
+
+    try assertPieceTableContents(&pt, "xthe cat is fluffy");
+
+    try pt.remove(1, 1);
+
+    try assertPieceTableContents(&pt, "xhe cat is fluffy");
+}
+
+test "move after remove" {
+    // const expectEqual = std.testing.expectEqual;
+
+    const str = "the cat is fluffy\nsuper dog";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.remove(0, 0);
+
+    try assertPieceTableContents(&pt, "he cat is fluffy\nsuper dog");
+
+    _ = pt.clampPosition(1, 0) orelse unreachable;
 }
