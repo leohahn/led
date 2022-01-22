@@ -273,6 +273,8 @@ pub const PieceTable = struct {
     }
 
     pub fn toString(self: *const Self, allocator: Allocator, start_line: i32) ![]const u8 {
+        log.debug("converting piece table to string");
+
         var str_buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 20);
         const maybe_piece_position = self.findPieceWithLine(start_line);
         const piece_position = maybe_piece_position orelse return str_buf.toOwnedSlice(allocator);
@@ -282,9 +284,7 @@ pub const PieceTable = struct {
                 // do nothing
             },
             .inside_piece => |inside_piece| {
-                log.info("T3");
                 for (self.pieces.items[inside_piece.index..]) |piece, i| {
-                    log.debugf("WILL GET PIECE BUFFER FOR {d}", .{i});
                     const piece_buffer = piece.getBuffer(self.buffers);
                     if (i == 0) {
                         const s = piece_buffer[inside_piece.offset..];
@@ -322,15 +322,16 @@ pub const PieceTable = struct {
         var piece_before: ?Piece = blk: {
             if (start_piece_offset > 0) {
                 const piece_before_len = start_piece_offset;
-                const piece_before_buffer = start_piece_buffer[0..piece_before_len];
+                const piece_before_buffer = start_piece_buffer[0..start_piece_offset];
                 const codepoint_count = try utf8CountCodepoints(piece_before_buffer);
+                const line_count = countLinesInString(piece_before_buffer);
 
                 break :blk Piece{
                     .buffer = start_piece.buffer,
                     .start = start_piece.start,
                     .len = piece_before_len,
                     .codepoint_count = @intCast(u32, codepoint_count),
-                    .line_count = countLinesInString(piece_before_buffer),
+                    .line_count = line_count,
                 };
             }
 
@@ -342,59 +343,73 @@ pub const PieceTable = struct {
 
         var piece_after: ?Piece = blk: {
             if (end_piece_offset < end_piece_buffer.len - 1) {
-                const piece_after_len = end_piece_offset;
-                const piece_after_buffer = end_piece_buffer[0..piece_after_len];
+                const piece_after_buffer = end_piece_buffer[end_piece_offset + 1..end_piece.len];
                 const codepoint_count = try utf8CountCodepoints(piece_after_buffer);
+                const line_count = countLinesInString(piece_after_buffer);
 
                 break :blk Piece{
                     .buffer = start_piece.buffer,
                     .start = end_piece.start + end_piece_offset + 1,
                     .len = @intCast(u32, end_piece.len) - end_piece_offset - 1,
                     .codepoint_count = @intCast(u32, codepoint_count),
-                    .line_count = countLinesInString(piece_after_buffer),
+                    .line_count = line_count,
                 };
             }
 
             break :blk null;
         };
 
-        // Remove all pieces between the indexes given as parameters.
-        var index: usize = start_piece_index;
-        while (index <= end_piece_index) : (index += 1) {
-            _ = self.pieces.orderedRemove(start_piece_index);
-        }
+        var new_start_piece_index = start_piece_index;
+        var new_end_piece_index = end_piece_index;
 
         if (piece_before != null) {
-            log.infof("piece before: start={d} len={d}", .{
+            const piece_before_buffer = piece_before.?.getBuffer(self.buffers);
+            log.infof("piece before: start={d} len={d} line_count={d}\n{s}", .{
                 piece_before.?.start,
                 piece_before.?.len,
+                piece_before.?.line_count,
+                piece_before_buffer,
             });
 
             try self.pieces.insert(self.allocator, start_piece_index, piece_before.?);
-        }
 
-        log.infof("AAAAAAA: {d}|{d}", .{
-            start_piece_index + 1,
-            self.pieces.items.len,
-        });
+            new_start_piece_index += 1;
+            new_end_piece_index += 1;
+        } else {
+            log.debug("no piece before");
+        }
 
         if (piece_after != null) {
-            log.infof("piece after: start={d} len={d}", .{
+            const piece_after_buffer = piece_after.?.getBuffer(self.buffers);
+            log.infof("piece after: start={d} len={d} line_count={d}\n{s}", .{
                 piece_after.?.start,
                 piece_after.?.len,
+                piece_after.?.line_count,
+                piece_after_buffer,
             });
 
-            if (self.pieces.items.len < (start_piece_index + 1)) {
-                try self.pieces.append(self.allocator, piece_after.?);
-            } else if ((start_piece_index + 1) == self.pieces.items.len) {
+            if (new_end_piece_index == self.pieces.items.len - 1) {
+                log.debug("BRANCH 1");
                 try self.pieces.append(self.allocator, piece_after.?);
             } else {
-                try self.pieces.insert(self.allocator, start_piece_index + 1, piece_after.?);
+                log.debug("BRANCH 2");
+                try self.pieces.insert(self.allocator, new_end_piece_index + 1, piece_after.?);
             }
+        } else {
+            log.debug("no piece after");
         }
+
+        // Remove all pieces between the indexes given as parameters.
+        var index: usize = new_start_piece_index;
+        while (index <= new_end_piece_index) : (index += 1) {
+            _ = self.pieces.orderedRemove(new_start_piece_index);
+        }
+
     }
 
     pub fn remove(self: *Self, start_pos: u32, end_pos: u32) !void {
+        log.debugf("removing {d}:{d}", .{start_pos, end_pos});
+
         const start_piece_position = self.findPosition(start_pos) orelse return error.InvalidPosition;
         const end_piece_position = self.findPosition(end_pos) orelse return error.InvalidPosition;
 
@@ -506,7 +521,10 @@ pub const PieceTable = struct {
         var accumulated_line: i32 = 0;
         var accumulated_offset: u32 = 0;
 
+        log.debugf("pieces number: {d}", .{self.pieces.items.len});
+
         for (self.pieces.items) |piece, index| {
+            log.debugf("LINES IN PIECE {d}: {d}", .{index, piece.line_count});
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
             if (new_accumulated_line >= desired_line) {
                 maybe_piece_index = @intCast(u32, index);
@@ -515,6 +533,8 @@ pub const PieceTable = struct {
             accumulated_line = new_accumulated_line;
             accumulated_offset += piece.codepoint_count;
         }
+
+        log.debugf("accumulated line {d}", .{accumulated_line});
 
         const piece_index = maybe_piece_index orelse return null;
 
@@ -976,7 +996,7 @@ test "remove with inserts" {
 
 test "move after remove" {
     // const expectEqual = std.testing.expectEqual;
-
+    //
     const str = "the cat is fluffy\nsuper dog";
 
     var pt = try PieceTable.initFromString(std.testing.allocator, str);
@@ -987,4 +1007,103 @@ test "move after remove" {
     try assertPieceTableContents(&pt, "he cat is fluffy\nsuper dog");
 
     _ = pt.clampPosition(1, 0) orelse unreachable;
+}
+
+test "removes 1" {
+    const expectEqual = std.testing.expectEqual;
+    //
+    const str = "abcdefghi\n123456789";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try expectEqual(@as(usize, 1), pt.pieces.items.len);
+    try expectEqual(Piece{
+        .start = 0,
+        .len = str.len,
+        .codepoint_count = str.len,
+        .buffer = Buffer.original,
+        .line_count = 1,
+    }, pt.pieces.items[0]);
+
+    try pt.remove(5, 5);
+
+    try expectEqual(@as(usize, 2), pt.pieces.items.len);
+    try expectEqual(Piece{
+        .start = 0,
+        .len = 5,
+        .codepoint_count = 5,
+        .buffer = Buffer.original,
+        .line_count = 0,
+    }, pt.pieces.items[0]);
+    try expectEqual(Piece{
+        .start = 6,
+        .len = str.len - 6,
+        .codepoint_count = str.len - 6,
+        .buffer = Buffer.original,
+        .line_count = 1,
+    }, pt.pieces.items[1]);
+
+    try assertPieceTableContents(&pt, "abcdeghi\n123456789");
+
+    try pt.remove(0, 0);
+
+    try expectEqual(@as(usize, 2), pt.pieces.items.len);
+    try expectEqual(Piece{
+        .start = 1,
+        .len = 4,
+        .codepoint_count = 4,
+        .buffer = Buffer.original,
+        .line_count = 0,
+    }, pt.pieces.items[0]);
+    try expectEqual(Piece{
+        .start = 6,
+        .len = str.len - 6,
+        .codepoint_count = str.len - 6,
+        .buffer = Buffer.original,
+        .line_count = 1,
+    }, pt.pieces.items[1]);
+
+    try assertPieceTableContents(&pt, "bcdeghi\n123456789");
+}
+
+test "removes 2" {
+    const expectEqual = std.testing.expectEqual;
+
+    const str = "abcdefghi\n123456789";
+
+    var pt = try PieceTable.initFromString(std.testing.allocator, str);
+    defer pt.deinit();
+
+    try pt.remove(18, 18);
+
+    try assertPieceTableContents(&pt, "abcdefghi\n12345678");
+
+    try pt.remove(8, 8);
+
+    try assertPieceTableContents(&pt, "abcdefgh\n12345678");
+
+    try expectEqual(@as(usize, 2), pt.pieces.items.len);
+    try expectEqual(Piece{
+        .start = 0,
+        .len = 8,
+        .codepoint_count = 8,
+        .buffer = Buffer.original,
+        .line_count = 0,
+    }, pt.pieces.items[0]);
+    try expectEqual(Piece{
+        .start = 9,
+        .len = 9,
+        .codepoint_count = 9,
+        .buffer = Buffer.original,
+        .line_count = 1,
+    }, pt.pieces.items[1]);
+
+    // _ = pt.clampPosition(1, 0) orelse unreachable;
+
+    // try expectEqual(Position{
+    //     .line = 1,
+    //     .col = 0,
+    //     .offset = 9,
+    // }, pos);
 }
