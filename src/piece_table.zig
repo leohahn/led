@@ -273,8 +273,6 @@ pub const PieceTable = struct {
     }
 
     pub fn toString(self: *const Self, allocator: Allocator, start_line: i32) ![]const u8 {
-        log.debug("converting piece table to string");
-
         var str_buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 20);
         const maybe_piece_position = self.findPieceWithLine(start_line);
         const piece_position = maybe_piece_position orelse return str_buf.toOwnedSlice(allocator);
@@ -287,12 +285,8 @@ pub const PieceTable = struct {
                 for (self.pieces.items[inside_piece.index..]) |piece, i| {
                     const piece_buffer = piece.getBuffer(self.buffers);
                     if (i == 0) {
-                        const s = piece_buffer[inside_piece.offset..];
-                        log.infof("s: {s}", .{s});
                         try str_buf.appendSlice(allocator, piece_buffer[inside_piece.offset..]);
                     } else {
-                        const s = piece_buffer;
-                        log.infof("s: {s}", .{s});
                         try str_buf.appendSlice(allocator, piece_buffer);
                     }
                 }

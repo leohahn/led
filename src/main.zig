@@ -14,7 +14,10 @@ const Window = window.Window;
 const VERSION = "0.1.0";
 
 const Screen = struct {
+    line_count: i32,
+    col_count: i32,
     window: Window,
+    console_window: ?Window,
     raw_mode: terminal.RawMode,
 
     const Self = @This();
@@ -28,8 +31,11 @@ const Screen = struct {
         const buffer_col: window.Col = .{ .val = 5 };
 
         return Self{
+            .line_count = size.lines,
+            .col_count = size.cols,
             .raw_mode = raw_mode,
             .window = Window{
+                .attributes = .{},
                 .boundary = window.TerminalBoundary{
                     .start_col = .{ .val = 0 },
                     .start_line = .{ .val = 0 },
@@ -44,12 +50,48 @@ const Screen = struct {
                     .status_line = .{ .val = size.lines - 1 },
                 },
             },
+            .console_window = null,
         };
     }
 
     fn deinit(self: *const Self) !void {
         try terminal.leaveAlternateScreenBuffer();
         try self.raw_mode.disable();
+    }
+
+    fn openConsoleWindow(self: *Self) void {
+        const height = @floatToInt(i32, @intToFloat(f32, self.line_count) * 0.3);
+        // const new_window_height = self.window.boundary.line_count - height - 1;
+
+        self.window.boundary.line_count -= height;
+        self.window.attributes.horizontal_border = true;
+
+        self.console_window = Window{
+            .boundary = window.TerminalBoundary{
+                .start_col = .{ .val = 0 },
+                .start_line = .{ 
+                    .val = self.window.boundary.start_line.val + self.window.boundary.line_count,
+                },
+                .line_count = self.line_count - self.window.boundary.line_count,
+                .col_count = self.col_count,
+            },
+            .properties = window.Properties{
+                .markers_col = .{ .val = 0 },
+                .line_number_col = .{ .val = 1 },
+                .buffer_col = .{ .val = 5 },
+                .buffer_line = .{ .val = 0 },
+                .status_line = null,
+            },
+            .attributes = .{},
+        };
+
+        log.debugf(
+            "window: start_line={d} line_count={d}", 
+            .{self.window.boundary.start_line.val, self.window.boundary.line_count});
+
+        log.debugf(
+            "console window: start_line={d} line_count={d}", 
+            .{self.console_window.?.boundary.start_line.val, self.console_window.?.boundary.line_count});
     }
 };
 
@@ -108,6 +150,7 @@ const Command = union(enum) {
     goto_start_of_line,
     insert: u8,
     remove_here,
+    open_console_window,
     noop,
 };
 
@@ -140,7 +183,9 @@ const VimEmulator = struct {
                 if (c == 'l') {
                     return .cursor_right;
                 }
-
+                if (c == ':') {
+                    return .open_console_window;
+                }
                 return Command{
                     .insert = c,
                 };
@@ -245,6 +290,9 @@ fn processCommand(
             try buffer.updateContents(table);
             cursorLeft(buffer, table);
         },
+        .open_console_window => {
+            screen.openConsoleWindow();
+        },
         .noop => {
             // do nothing.
         },
@@ -305,6 +353,19 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
         line = .{ .val = line.val + 1 };
         display_line += 1;
     }) {
+        if ((line.val == last_terminal_line.val) and win.attributes.horizontal_border) {
+            try terminal.moveCursorToPosition(writer, .{
+                .line = line,
+                .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
+            });
+
+            var col: i32 = 0;
+            while (col < win.boundary.col_count) : (col += 1) {
+                _ = try writer.write("─");
+            }
+            continue;
+        }
+
         if (win.isStatusLine(line)) {
             try terminal.moveCursorToPosition(writer, .{
                 .line = line,
@@ -452,6 +513,9 @@ fn run(allocator: Allocator, args: Args) anyerror!void {
         try terminal.hideCursor(frame.writer());
         try terminal.refreshScreen(frame.writer());
         try drawWindow(frame.writer(), screen.window, &resources, bh);
+        if (screen.console_window != null) {
+            try drawWindow(frame.writer(), screen.console_window.?, &resources, bh);
+        }
         try terminal.showCursor(frame.writer());
 
         const stdout = std.io.getStdOut();
