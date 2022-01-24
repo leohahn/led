@@ -26,6 +26,35 @@ pub const Col = struct {
     }
 };
 
+pub const ContentsLine = struct {
+    val: i32,
+
+    const Self = @This();
+    pub fn toWindowLine(self: Self, offset: Line) Line {
+        return .{ .val = self.val + offset.val };
+    }
+
+    pub fn sub(self: Self, other: Self) Self {
+        return .{ .val = self.val - other.val };
+    }
+};
+
+pub const ContentsCol = struct {
+    val: i32,
+
+    const Self = @This();
+    pub fn toWindowCol(self: Self, offset: Col) Col {
+        return .{ .val = self.val + offset.val };
+    }
+};
+
+pub const Cursor = struct {
+    line: ContentsLine,
+    col: ContentsCol,
+    render_col: ContentsCol,
+    table_offset: u32,
+};
+
 pub const Properties = struct {
     line_number_col: Col,
     markers_col: Col,
@@ -47,6 +76,7 @@ pub const Window = struct {
     properties: Properties,
     boundary: TerminalBoundary,
     attributes: Attributes,
+    cursor: Cursor,
 
     const Self = @This();
 

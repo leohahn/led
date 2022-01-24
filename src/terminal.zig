@@ -44,7 +44,7 @@ pub fn readInputEvent() !?KeyEvent {
     if (buffer[0] == '\x1b') {
         var escape_seq = [1]u8{0} ** 3;
 
-        if ((try stdin.read(escape_seq[0..1])) != 1) return .unknown;
+        if ((try stdin.read(escape_seq[0..1])) != 1) return .esc;
         if ((try stdin.read(escape_seq[1..2])) != 1) return .unknown;
 
         if (escape_seq[0] == '[') {

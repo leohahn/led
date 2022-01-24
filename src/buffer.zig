@@ -4,41 +4,11 @@ const ref = @import("./ref.zig");
 const PieceTable = @import("./piece_table.zig").PieceTable;
 const window = @import("./window.zig");
 
-pub const Line = struct {
-    val: i32,
-
-    const Self = @This();
-    pub fn toWindowLine(self: Self, offset: window.Line) window.Line {
-        return .{ .val = self.val + offset.val };
-    }
-
-    pub fn sub(self: Self, other: Self) Self {
-        return .{ .val = self.val - other.val };
-    }
-};
-
-pub const Col = struct {
-    val: i32,
-
-    const Self = @This();
-    pub fn toWindowCol(self: Self, offset: window.Col) window.Col {
-        return .{ .val = self.val + offset.val };
-    }
-};
-
-pub const Cursor = struct {
-    line: Line,
-    col: Col,
-    render_col: Col,
-    table_offset: u32,
-};
-
 pub const Buffer = struct {
     allocator: Allocator,
     th: ref.TableHandle,
     contents: []const u8,
     read_only: bool,
-    cursor: Cursor,
     start_line: i32,
 
     const Self = @This();
@@ -52,12 +22,6 @@ pub const Buffer = struct {
             .contents = contents,
             .read_only = false,
             .start_line = 0,
-            .cursor = .{
-                .line = .{ .val = 0 },
-                .col = .{ .val = 0 },
-                .render_col = .{ .val = 0 },
-                .table_offset = 0,
-            },
         };
     }
 

@@ -49,6 +49,12 @@ const Screen = struct {
                     .buffer_line = buffer_line,
                     .status_line = .{ .val = size.lines - 1 },
                 },
+                .cursor = .{
+                    .line = .{ .val = 0 },
+                    .col = .{ .val = 0 },
+                    .render_col = .{ .val = 0 },
+                    .table_offset = 0,
+                },
             },
             .console_window = null,
         };
@@ -59,9 +65,26 @@ const Screen = struct {
         try self.raw_mode.disable();
     }
 
+    fn getActiveWindow(self: *Self) *Window {
+        if (self.console_window != null) {
+            return &self.console_window.?;
+        }
+        return &self.window;
+    }
+
+    fn getConsoleWindowHeight(self: *const Self) i32 {
+        return @floatToInt(i32, @intToFloat(f32, self.line_count) * 0.3);
+    }
+
+    fn closeConsoleWindow(self: *Self) void {
+        const height = self.getConsoleWindowHeight();
+        self.window.boundary.line_count += height;
+        self.window.attributes.horizontal_border = false;
+        self.console_window = null;
+    }
+
     fn openConsoleWindow(self: *Self) void {
-        const height = @floatToInt(i32, @intToFloat(f32, self.line_count) * 0.3);
-        // const new_window_height = self.window.boundary.line_count - height - 1;
+        const height = self.getConsoleWindowHeight();
 
         self.window.boundary.line_count -= height;
         self.window.attributes.horizontal_border = true;
@@ -83,6 +106,12 @@ const Screen = struct {
                 .status_line = null,
             },
             .attributes = .{},
+            .cursor = .{
+                .line = .{ .val = 0 },
+                .col = .{ .val = 0 },
+                .render_col = .{ .val = 0 },
+                .table_offset = 0,
+            },
         };
 
         log.debugf(
@@ -95,42 +124,42 @@ const Screen = struct {
     }
 };
 
-fn cursorDown(buffer: *Buffer, table: *const PieceTable) void {
-    const maybe_pos = table.clampPosition(buffer.cursor.line.val + 1, buffer.cursor.col.val);
+fn cursorDown(win: *Window, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(win.cursor.line.val + 1, win.cursor.col.val);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = .{ .val = pos.line };
-    buffer.cursor.render_col = .{ .val = pos.col };
-    buffer.cursor.table_offset = pos.offset;
+    win.cursor.line = .{ .val = pos.line };
+    win.cursor.render_col = .{ .val = pos.col };
+    win.cursor.table_offset = pos.offset;
 }
 
-fn cursorUp(buffer: *Buffer, table: *const PieceTable) void {
-    const maybe_pos = table.clampPosition(buffer.cursor.line.val - 1, buffer.cursor.col.val);
+fn cursorUp(win: *Window, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(win.cursor.line.val - 1, win.cursor.col.val);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = .{ .val = pos.line };
-    buffer.cursor.render_col = .{ .val = pos.col };
-    buffer.cursor.table_offset = pos.offset;
+    win.cursor.line = .{ .val = pos.line };
+    win.cursor.render_col = .{ .val = pos.col };
+    win.cursor.table_offset = pos.offset;
 }
 
-fn cursorLeft(buffer: *Buffer, table: *const PieceTable) void {
-    const maybe_pos = table.clampPosition(buffer.cursor.line.val, buffer.cursor.col.val - 1);
+fn cursorLeft(win: *Window, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(win.cursor.line.val, win.cursor.col.val - 1);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = .{ .val = pos.line };
-    buffer.cursor.render_col = .{ .val = pos.col };
-    buffer.cursor.col = buffer.cursor.render_col;
-    buffer.cursor.table_offset = pos.offset;
+    win.cursor.line = .{ .val = pos.line };
+    win.cursor.render_col = .{ .val = pos.col };
+    win.cursor.col = win.cursor.render_col;
+    win.cursor.table_offset = pos.offset;
 }
 
-fn cursorRight(buffer: *Buffer, table: *const PieceTable) void {
-    const maybe_pos = table.clampPosition(buffer.cursor.line.val, buffer.cursor.col.val + 1);
+fn cursorRight(win: *Window, table: *const PieceTable) void {
+    const maybe_pos = table.clampPosition(win.cursor.line.val, win.cursor.col.val + 1);
     const pos = maybe_pos orelse return;
 
-    buffer.cursor.line = .{ .val = pos.line };
-    buffer.cursor.render_col = .{ .val = pos.col };
-    buffer.cursor.col = buffer.cursor.render_col;
-    buffer.cursor.table_offset = pos.offset;
+    win.cursor.line = .{ .val = pos.line };
+    win.cursor.render_col = .{ .val = pos.col };
+    win.cursor.col = win.cursor.render_col;
+    win.cursor.table_offset = pos.offset;
 }
 
 const VimMode = enum {
@@ -151,6 +180,7 @@ const Command = union(enum) {
     insert: u8,
     remove_here,
     open_console_window,
+    close_console_window,
     noop,
 };
 
@@ -222,6 +252,9 @@ const VimEmulator = struct {
                     .insert = '\n',
                 };
             },
+            .esc => {
+                return .close_console_window;
+            },
             else => {
                 return .noop;
             },
@@ -237,19 +270,20 @@ fn processCommand(
 ) !bool {
     var buffer = resources.getBuffer(bh);
     var table = resources.getTable(buffer.th);
+    var win = screen.getActiveWindow();
 
     switch (command) {
         .cursor_down => {
-            cursorDown(buffer, table);
+            cursorDown(win, table);
         },
         .cursor_up => {
-            cursorUp(buffer, table);
+            cursorUp(win, table);
         },
         .cursor_left => {
-            cursorLeft(buffer, table);
+            cursorLeft(win, table);
         },
         .cursor_right => {
-            cursorRight(buffer, table);
+            cursorRight(win, table);
         },
         .quit => {
             return true;
@@ -257,41 +291,44 @@ fn processCommand(
         .half_screen_up => {
             var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
-                cursorUp(buffer, table);
+                cursorUp(win, table);
             }
         },
         .half_screen_down => {
             var times = screen.window.boundary.line_count;
             while (times > 0) : (times -= 1) {
-                cursorDown(buffer, table);
+                cursorDown(win, table);
             }
         },
         .goto_end_of_line => {
             var times = screen.window.boundary.col_count;
             while (times > 0) : (times -= 1) {
-                cursorRight(buffer, table);
+                cursorRight(win, table);
             }
         },
         .goto_start_of_line => {
             var times = screen.window.boundary.col_count;
             while (times > 0) : (times -= 1) {
-                cursorLeft(buffer, table);
+                cursorLeft(win, table);
             }
         },
         .insert => |c| {
-            log.infof("inserting into offset {d}", .{buffer.cursor.table_offset});
+            log.infof("inserting into offset {d}", .{win.cursor.table_offset});
             var buf = [1]u8{c};
-            try table.insert(buffer.cursor.table_offset, &buf);
+            try table.insert(win.cursor.table_offset, &buf);
             try buffer.updateContents(table);
-            cursorRight(buffer, table);
+            cursorRight(win, table);
         },
         .remove_here => {
-            try table.remove(buffer.cursor.table_offset, buffer.cursor.table_offset);
+            try table.remove(win.cursor.table_offset, win.cursor.table_offset);
             try buffer.updateContents(table);
-            cursorLeft(buffer, table);
+            cursorLeft(win, table);
         },
         .open_console_window => {
             screen.openConsoleWindow();
+        },
+        .close_console_window => {
+            screen.closeConsoleWindow();
         },
         .noop => {
             // do nothing.
@@ -325,7 +362,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
 
     // The numbers of line that we need to skip in order to be able to see the cursor on the screen.
     const lines_to_skip: i32 = blk: {
-        const cursor_line = buffer.cursor.line
+        const cursor_line = win.cursor.line
             .toWindowLine(win.properties.buffer_line);
 
         const cursor_window_line = cursor_line.val - buffer.start_line;
@@ -371,7 +408,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
                 .line = line,
                 .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
             });
-            _ = try writer.print("{d}:{d}", .{buffer.cursor.line.val, buffer.cursor.col.val});
+            _ = try writer.print("{d}:{d}", .{win.cursor.line.val, win.cursor.col.val});
             continue;
         }
 
@@ -410,11 +447,11 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
     }
 
     try terminal.moveCursorToPosition(writer, .{
-        .line = buffer.cursor.line
+        .line = win.cursor.line
             .sub(.{ .val = buffer.start_line })
             .toWindowLine(win.properties.buffer_line)
             .toTerminalLine(win.boundary.start_line),
-        .col = buffer.cursor.render_col
+        .col = win.cursor.render_col
             .toWindowCol(win.properties.buffer_col)
             .toTerminalCol(win.boundary.start_col),
     });
