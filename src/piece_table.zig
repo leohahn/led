@@ -337,7 +337,7 @@ pub const PieceTable = struct {
 
         var piece_after: ?Piece = blk: {
             if (end_piece_offset < end_piece_buffer.len - 1) {
-                const piece_after_buffer = end_piece_buffer[end_piece_offset + 1..end_piece.len];
+                const piece_after_buffer = end_piece_buffer[end_piece_offset + 1 .. end_piece.len];
                 const codepoint_count = try utf8CountCodepoints(piece_after_buffer);
                 const line_count = countLinesInString(piece_after_buffer);
 
@@ -398,11 +398,10 @@ pub const PieceTable = struct {
         while (index <= new_end_piece_index) : (index += 1) {
             _ = self.pieces.orderedRemove(new_start_piece_index);
         }
-
     }
 
     pub fn remove(self: *Self, start_pos: u32, end_pos: u32) !void {
-        log.debugf("removing {d}:{d}", .{start_pos, end_pos});
+        log.debugf("removing {d}:{d}", .{ start_pos, end_pos });
 
         const start_piece_position = self.findPosition(start_pos) orelse return error.InvalidPosition;
         const end_piece_position = self.findPosition(end_pos) orelse return error.InvalidPosition;
@@ -518,7 +517,7 @@ pub const PieceTable = struct {
         log.debugf("pieces number: {d}", .{self.pieces.items.len});
 
         for (self.pieces.items) |piece, index| {
-            log.debugf("LINES IN PIECE {d}: {d}", .{index, piece.line_count});
+            log.debugf("LINES IN PIECE {d}: {d}", .{ index, piece.line_count });
             const new_accumulated_line: i32 = accumulated_line + piece.line_count;
             if (new_accumulated_line >= desired_line) {
                 maybe_piece_index = @intCast(u32, index);
@@ -795,35 +794,19 @@ test "countColumnsInLine" {
 
     const text = "\nthe big dog\njumped over the lazy\n\ndog\n\n";
 
-    try expectEqual(
-        ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 0 } }, 
-        try countColumnsInLine(text, 0));
-    try expectEqual(
-        ColumnCount{ .count = .{ .columns = 11, .codepoints_until_line = 1 } }, 
-        try countColumnsInLine(text, 1));
-    try expectEqual(
-        ColumnCount{ .count = .{ .columns = 20, .codepoints_until_line = 13 } }, 
-        try countColumnsInLine(text, 2));
-    try expectEqual(
-        ColumnCount{ .count = .{ .columns = 3, .codepoints_until_line = 35 } }, 
-        try countColumnsInLine(text, 4));
-    try expectEqual(
-        ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 39 } }, 
-        try countColumnsInLine(text, 5));
-    try expectEqual(
-        ColumnCount{ .unfinished_count = .{ .columns = 0, .codepoints_until_line = 40 } }, 
-        try countColumnsInLine(text, 6));
+    try expectEqual(ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 0 } }, try countColumnsInLine(text, 0));
+    try expectEqual(ColumnCount{ .count = .{ .columns = 11, .codepoints_until_line = 1 } }, try countColumnsInLine(text, 1));
+    try expectEqual(ColumnCount{ .count = .{ .columns = 20, .codepoints_until_line = 13 } }, try countColumnsInLine(text, 2));
+    try expectEqual(ColumnCount{ .count = .{ .columns = 3, .codepoints_until_line = 35 } }, try countColumnsInLine(text, 4));
+    try expectEqual(ColumnCount{ .count = .{ .columns = 0, .codepoints_until_line = 39 } }, try countColumnsInLine(text, 5));
+    try expectEqual(ColumnCount{ .unfinished_count = .{ .columns = 0, .codepoints_until_line = 40 } }, try countColumnsInLine(text, 6));
     try expectError(error.InvalidLine, countColumnsInLine(text, 7));
 
     const text2 = "a dog";
-    try expectEqual(
-        ColumnCount{ .unfinished_count = .{ .columns = 5, .codepoints_until_line = 0 } }, 
-        try countColumnsInLine(text2, 0));
+    try expectEqual(ColumnCount{ .unfinished_count = .{ .columns = 5, .codepoints_until_line = 0 } }, try countColumnsInLine(text2, 0));
 
     const text3 = "the cat";
-    try expectEqual(
-        ColumnCount{ .unfinished_count = .{ .columns = 7, .codepoints_until_line = 0 } }, 
-        try countColumnsInLine(text3, 0));
+    try expectEqual(ColumnCount{ .unfinished_count = .{ .columns = 7, .codepoints_until_line = 0 } }, try countColumnsInLine(text3, 0));
 }
 
 test "clampPosition" {

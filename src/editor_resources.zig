@@ -22,9 +22,6 @@ pub const EditorResources = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.buffers.items) |*buffer| {
-            buffer.deinit();
-        }
         self.buffers.deinit(self.allocator);
 
         for (self.tables.items) |*table| {
@@ -48,8 +45,7 @@ pub const EditorResources = struct {
     }
 
     pub fn createBuffer(self: *Self, table_handle: ref.TableHandle) !ref.BufferHandle {
-        const table = self.getTable(table_handle);
-        const buffer = try Buffer.init(self.allocator, table_handle, table);
+        const buffer = Buffer.init(table_handle);
         try self.buffers.append(self.allocator, buffer);
         return ref.BufferHandle{ .val = @intCast(u32, self.buffers.items.len) - 1 };
     }

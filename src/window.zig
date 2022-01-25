@@ -72,7 +72,16 @@ pub const TerminalBoundary = struct {
     col_count: i32,
 };
 
+var next_window_id: i32 = 1;
+
+pub fn genId() i32 {
+    const id = next_window_id;
+    next_window_id += 1;
+    return id;
+}
+
 pub const Window = struct {
+    id: i32,
     properties: Properties,
     boundary: TerminalBoundary,
     attributes: Attributes,

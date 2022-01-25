@@ -19,50 +19,64 @@ const Screen = struct {
     window: Window,
     console_window: ?Window,
     raw_mode: terminal.RawMode,
+    windows_to_buffers: std.AutoHashMap(i32, ref.BufferHandle),
 
     const Self = @This();
 
-    fn init(writer: anytype) !Self {
+    fn init(allocator: Allocator, writer: anytype) !Self {
         const raw_mode = try terminal.RawMode.enable();
         try terminal.useAlternateScreenBuffer(writer);
         const size = try terminal.getWindowSize();
 
-        const buffer_line: window.Line = .{ .val = 0 };
-        const buffer_col: window.Col = .{ .val = 5 };
+        const boundary = window.TerminalBoundary{
+            .start_col = .{ .val = 0 },
+            .start_line = .{ .val = 0 },
+            .line_count = size.lines,
+            .col_count = size.cols,
+        };
+
+        var properties = window.Properties{
+            .markers_col = .{ .val = 0 },
+            .line_number_col = .{ .val = 1 },
+            .buffer_col = .{ .val = 5 },
+            .buffer_line = .{ .val = 0 },
+            .status_line = null,
+        };
+        properties.status_line = window.Line{ .val = size.lines - 1 };
+
+        const win = Window{
+            .id = 0,
+            .attributes = .{},
+            .boundary = boundary,
+            .properties = properties,
+            .cursor = .{
+                .line = .{ .val = 0 },
+                .col = .{ .val = 0 },
+                .render_col = .{ .val = 0 },
+                .table_offset = 0,
+            },
+        };
+
+        var windows_to_buffers = std.AutoHashMap(i32, ref.BufferHandle).init(allocator);
 
         return Self{
+            .windows_to_buffers = windows_to_buffers,
             .line_count = size.lines,
             .col_count = size.cols,
             .raw_mode = raw_mode,
-            .window = Window{
-                .attributes = .{},
-                .boundary = window.TerminalBoundary{
-                    .start_col = .{ .val = 0 },
-                    .start_line = .{ .val = 0 },
-                    .line_count = size.lines,
-                    .col_count = size.cols,
-                },
-                .properties = window.Properties{
-                    .markers_col = .{ .val = 0 },
-                    .line_number_col = .{ .val = 1 },
-                    .buffer_col = buffer_col,
-                    .buffer_line = buffer_line,
-                    .status_line = .{ .val = size.lines - 1 },
-                },
-                .cursor = .{
-                    .line = .{ .val = 0 },
-                    .col = .{ .val = 0 },
-                    .render_col = .{ .val = 0 },
-                    .table_offset = 0,
-                },
-            },
+            .window = win,
             .console_window = null,
         };
     }
 
-    fn deinit(self: *const Self) !void {
+    fn attachBufferToWindow(self: *Self, bh: ref.BufferHandle, window_id: i32) !void {
+        try self.windows_to_buffers.putNoClobber(window_id, bh);
+    }
+
+    fn deinit(self: *Self) !void {
         try terminal.leaveAlternateScreenBuffer();
         try self.raw_mode.disable();
+        self.windows_to_buffers.deinit();
     }
 
     fn getActiveWindow(self: *Self) *Window {
@@ -77,22 +91,21 @@ const Screen = struct {
     }
 
     fn closeConsoleWindow(self: *Self) void {
-        const height = self.getConsoleWindowHeight();
-        self.window.boundary.line_count += height;
+        self.window.boundary.line_count += 1;
         self.window.attributes.horizontal_border = false;
         self.console_window = null;
     }
 
-    fn openConsoleWindow(self: *Self) void {
-        const height = self.getConsoleWindowHeight();
-
-        self.window.boundary.line_count -= height;
+    fn openConsoleWindow(self: *Self) !void {
+        self.window.boundary.line_count -= 1;
+        // self.window.boundary.line_count -= height;
         self.window.attributes.horizontal_border = true;
 
         self.console_window = Window{
+            .id = window.genId(),
             .boundary = window.TerminalBoundary{
                 .start_col = .{ .val = 0 },
-                .start_line = .{ 
+                .start_line = .{
                     .val = self.window.boundary.start_line.val + self.window.boundary.line_count,
                 },
                 .line_count = self.line_count - self.window.boundary.line_count,
@@ -114,13 +127,7 @@ const Screen = struct {
             },
         };
 
-        log.debugf(
-            "window: start_line={d} line_count={d}", 
-            .{self.window.boundary.start_line.val, self.window.boundary.line_count});
-
-        log.debugf(
-            "console window: start_line={d} line_count={d}", 
-            .{self.console_window.?.boundary.start_line.val, self.console_window.?.boundary.line_count});
+        // try self.attachBufferToWindow(bh, self.console_window.?.id);
     }
 };
 
@@ -316,16 +323,14 @@ fn processCommand(
             log.infof("inserting into offset {d}", .{win.cursor.table_offset});
             var buf = [1]u8{c};
             try table.insert(win.cursor.table_offset, &buf);
-            try buffer.updateContents(table);
             cursorRight(win, table);
         },
         .remove_here => {
             try table.remove(win.cursor.table_offset, win.cursor.table_offset);
-            try buffer.updateContents(table);
             cursorLeft(win, table);
         },
         .open_console_window => {
-            screen.openConsoleWindow();
+            try screen.openConsoleWindow();
         },
         .close_console_window => {
             screen.closeConsoleWindow();
@@ -347,16 +352,30 @@ fn findCharInString(slice: []const u8, char: u8) ?usize {
     return null;
 }
 
-fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, bh: ref.BufferHandle) !void {
+fn drawWindow(
+    allocator: Allocator,
+    writer: anytype,
+    win: Window,
+    resources: *const EditorResources,
+    windows_to_buffers: *const std.AutoHashMap(i32, ref.BufferHandle),
+) !void {
     try terminal.moveCursorToPosition(writer, .{
         .line = win.boundary.start_line,
         .col = win.boundary.start_col,
     });
 
+    const bh = windows_to_buffers.get(win.id) orelse {
+        return error.UnknownBufferForWindow;
+    };
+
     var buffer = resources.getBuffer(bh);
-    assert(findCharInString(buffer.contents, '\r') == null);
 
     const table = resources.getTable(buffer.th);
+
+    var contents = try table.toString(allocator, buffer.start_line);
+    defer allocator.free(contents);
+
+    assert(findCharInString(contents, '\r') == null);
 
     const last_terminal_line = win.lastTerminalLine();
 
@@ -379,11 +398,11 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
     };
 
     if (lines_to_skip != 0) {
-        try buffer.scrollLines(lines_to_skip, table);
+        try buffer.scrollLines(lines_to_skip);
     }
 
     var line: terminal.Line = win.boundary.start_line;
-    var remaining_string = buffer.contents;
+    var remaining_string = contents;
     var display_line = buffer.start_line + 1;
 
     while (line.val <= last_terminal_line.val) : ({
@@ -408,7 +427,7 @@ fn drawWindow(writer: anytype, win: Window, resources: *const EditorResources, b
                 .line = line,
                 .col = win.properties.markers_col.toTerminalCol(win.boundary.start_col),
             });
-            _ = try writer.print("{d}:{d}", .{win.cursor.line.val, win.cursor.col.val});
+            _ = try writer.print("{d}:{d}", .{ win.cursor.line.val, win.cursor.col.val });
             continue;
         }
 
@@ -522,25 +541,26 @@ fn welcomeBuffer(allocator: Allocator, screen: Screen, resources: *EditorResourc
 }
 
 fn run(allocator: Allocator, args: Args) anyerror!void {
-    var cwd = std.fs.cwd();
-
     var resources = try EditorResources.init(allocator);
     defer resources.deinit();
 
     var frame = std.ArrayList(u8).init(allocator);
     defer frame.deinit();
 
-    var screen = try Screen.init(frame.writer());
+    var screen = try Screen.init(allocator, frame.writer());
     defer screen.deinit() catch {};
 
     var bh: ref.BufferHandle = undefined;
     if (args.file_path != null) {
+        var cwd = std.fs.cwd();
         var file = try cwd.openFile(args.file_path.?, .{ .read = true });
         var table_handle = try resources.createTableFromFile(file);
         bh = try resources.createBuffer(table_handle);
     } else {
         bh = try welcomeBuffer(allocator, screen, &resources);
     }
+
+    try screen.attachBufferToWindow(bh, screen.window.id);
 
     var emulator = VimEmulator{
         .mode = VimMode.normal,
@@ -549,9 +569,9 @@ fn run(allocator: Allocator, args: Args) anyerror!void {
     while (true) {
         try terminal.hideCursor(frame.writer());
         try terminal.refreshScreen(frame.writer());
-        try drawWindow(frame.writer(), screen.window, &resources, bh);
+        try drawWindow(allocator, frame.writer(), screen.window, &resources, &screen.windows_to_buffers);
         if (screen.console_window != null) {
-            try drawWindow(frame.writer(), screen.console_window.?, &resources, bh);
+            try drawWindow(allocator, frame.writer(), screen.console_window.?, &resources, &screen.windows_to_buffers);
         }
         try terminal.showCursor(frame.writer());
 
